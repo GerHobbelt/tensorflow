@@ -769,7 +769,7 @@ static void BuildArgMinMaxReductionBody(
 //===----------------------------------------------------------------------===//
 
 // Verify that the arguments to be passed into the function are the same types
-// as the function paramter types.
+// as the function parameter types.
 static bool ArgTypesMatchCallee(mlir::Operation *op, OperandRange args,
                                 SymbolRefAttr func) {
   auto module = op->getParentOfType<ModuleOp>();
