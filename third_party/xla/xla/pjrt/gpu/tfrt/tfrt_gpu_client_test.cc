@@ -56,7 +56,7 @@ limitations under the License.
 #include "xla/pjrt/gpu/gpu_topology.h"
 #include "xla/pjrt/gpu/gpu_topology.pb.h"
 #include "xla/pjrt/gpu/tfrt/gpu_event.h"
-#include "xla/pjrt/gpu/tfrt/tracked_tfrt_gpu_device_buffer.h"
+#include "xla/pjrt/gpu/tfrt/tracked_gpu_device_buffer.h"
 #include "xla/pjrt/host_memory_spaces.h"
 #include "xla/pjrt/mlir_to_hlo.h"
 #include "xla/pjrt/pjrt_client.h"
@@ -476,13 +476,13 @@ TEST(TfrtGpuClientTest, AcquireDonation) {
   auto size_in_bytes = ShapeUtil::ByteSizeOf(on_device_shape);
   TF_ASSERT_OK_AND_ASSIGN(
       auto device_buffer,
-      MaybeOwningGpuMemory::AllocateShared(device->allocator(),
-                                           device->local_device_id().value(),
-                                           size_in_bytes));
+      GpuDeviceMemory::Allocate(device->allocator(),
+                                device->local_device_id().value(),
+                                size_in_bytes));
   auto buffer_async_value_ref =
-      tsl::MakeAvailableAsyncValueRef<MaybeOwningGpuMemory>(
+      tsl::MakeAvailableAsyncValueRef<GpuDeviceMemory>(
           std::move(device_buffer));
-  auto tracked_device_buffer = std::make_unique<TrackedTfrtGpuDeviceBuffer>(
+  auto tracked_device_buffer = std::make_unique<TrackedGpuDeviceBuffer>(
       std::move(buffer_async_value_ref),
       tsl::MakeAvailableAsyncValueRef<GpuEvent>());
   auto memory_space = device->default_memory_space().value();
@@ -757,7 +757,7 @@ TEST(TfrtGpuClientTest, ToLiteralAsyncWithNonCompactLayout) {
             literal->Relayout(src_literal.shape().layout()).data<int32_t>());
 }
 
-TEST(StreamExecutorGpuClientTest, ToLiteralAsyncWithDifferentMajorToMinor) {
+TEST(TfrtGpuClientTest, ToLiteralAsyncWithDifferentMajorToMinor) {
   TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<PjRtClient> client,
                           GetTfrtGpuClient(GpuClientOptions()));
   ASSERT_GE(client->addressable_devices().size(), 1);
@@ -799,6 +799,30 @@ TEST(StreamExecutorGpuClientTest, ToLiteralAsyncWithDifferentMajorToMinor) {
   ASSERT_TRUE(ShapeUtil::Compatible(src_literal.shape(), literal->shape()));
   ASSERT_EQ(src_literal.data<int32_t>(),
             literal->Relayout(src_literal.shape().layout()).data<int32_t>());
+}
+
+TEST(TfrtGpuClientTest, ToLiteralAsyncToken) {
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<PjRtClient> client,
+                          GetTfrtGpuClient(GpuClientOptions()));
+  ASSERT_GE(client->addressable_devices().size(), 1);
+
+  xla::Literal literal = xla::LiteralUtil::CreateToken();
+
+  TF_ASSERT_OK_AND_ASSIGN(
+      auto buffer,
+      client->BufferFromHostLiteral(
+          literal, client->addressable_devices()[0]->memory_spaces()[0]));
+  TF_ASSERT_OK(buffer->GetReadyFuture().Await());
+
+  absl::Notification n;
+
+  buffer->ToLiteral(&literal).OnReady([&](absl::Status s) {
+    TF_ASSERT_OK(s);
+    n.Notify();
+  });
+  buffer.reset();
+
+  n.WaitForNotification();
 }
 
 TEST(TfrtGpuClientTest, ToLiteralAsyncBeforeBufferReady) {
