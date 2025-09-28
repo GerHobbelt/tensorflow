@@ -659,6 +659,7 @@ cc_library(
     deps = [
         ":backend_configs_cc",
         ":ir_emission_utils_proto_cc",
+        ":matmul_indexing_utils",
         ":target_util",
         "//xla:literal",
         "//xla:permutation_util",
@@ -685,9 +686,7 @@ cc_library(
         "@com_google_absl//absl/types:span",
         "@llvm-project//llvm:Core",
         "@llvm-project//llvm:Support",
-        "@llvm-project//llvm:TargetParser",
         "@local_tsl//tsl/platform:protobuf",
-        "@local_tsl//tsl/platform:statusor",
     ],
 )
 
@@ -917,13 +916,17 @@ cc_library(
     compatible_with = get_compatible_with_portable(),
     deps = [
         "//xla:autotuning_proto_cc",
+        "//xla:permutation_util",
         "//xla:shape_util",
         "//xla:status_macros",
         "//xla:util",
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
+        "//xla/tsl/platform:statusor",
+        "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/types:span",
         "@local_tsl//tsl/platform:statusor",
@@ -936,9 +939,11 @@ xla_cc_test(
     deps = [
         ":matmul_indexing_utils",
         "//xla:shape_util",
+        "//xla:xla_data_proto_cc",
         "//xla/hlo/parser:hlo_parser",
         "//xla/hlo/testlib:test",
         "//xla/tests:xla_internal_test_main",  # build_cleaner: keep
+        "//xla/tsl/lib/core:status_test_util",
         "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest",
         "@local_tsl//tsl/platform:status_matchers",
@@ -974,6 +979,7 @@ cc_library(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
+        "@llvm-project//llvm:Support",
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:statusor",
     ],

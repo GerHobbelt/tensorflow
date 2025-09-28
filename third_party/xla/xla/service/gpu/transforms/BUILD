@@ -596,14 +596,12 @@ cc_library(
         "//xla/hlo/pass:hlo_pass",
         "//xla/service/gpu:ir_emission_utils",
         "//xla/stream_executor:device_description",
+        "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings:string_view",
-        "@local_tsl//tsl/platform:logging",
-        "@local_tsl//tsl/platform:status",
-        "@local_tsl//tsl/platform:statusor",
     ],
 )
 
@@ -698,14 +696,8 @@ cc_library(
 xla_test(
     name = "cudnn_fused_conv_rewriter_test",
     srcs = ["cudnn_fused_conv_rewriter_test.cc"],
-    backend_tags = {
-        "gpu_a100": [
-            "noasan",
-            "nomsan",
-        ],
-    },
     backends = [
-        "gpu_a100",
+        "gpu_h100",
         "gpu_amd_any",
     ] + if_oss(["gpu_any"]),
     shard_count = 10,
