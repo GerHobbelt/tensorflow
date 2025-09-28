@@ -1,4 +1,5 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("//xla:xla.default.bzl", "xla_cc_test")
 load("//xla/python/pjrt_ifrt:pjrt_ifrt.bzl", "pjrt_ifrt_package_groups")
 load("//xla/tsl:tsl.bzl", "if_google", "internal_visibility")
@@ -246,6 +247,7 @@ cc_library(
         "//xla/pjrt:pjrt_future",
         "//xla/pjrt:pjrt_layout",
         "//xla/pjrt:utils",
+        "//xla/pjrt/distributed:client",
         "//xla/pjrt/distributed:key_value_store_interface",
         "//xla/pjrt/distributed:protocol_proto_cc",
         "//xla/pjrt/distributed:topology_util",
@@ -258,9 +260,13 @@ cc_library(
         "//xla/service:computation_placer_hdr",
         "//xla/service:hlo_proto_cc",
         "//xla/tsl/concurrency:ref_count",
+        "//xla/tsl/distributed_runtime:call_options",
+        "//xla/tsl/distributed_runtime/coordination:coordination_service_agent",
+        "//xla/tsl/platform:env",
         "//xla/tsl/platform:errors",
         "//xla/tsl/platform:logging",
         "//xla/tsl/platform:statusor",
+        "//xla/tsl/protobuf:coordination_service_proto_cc",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
