@@ -21,6 +21,7 @@ load("@local_xla//third_party/gemmlowp:workspace.bzl", gemmlowp = "repo")
 load("@local_xla//third_party/git:git_configure.bzl", "git_configure")
 load("@local_xla//third_party/gpus:rocm_configure.bzl", "rocm_configure")
 load("@local_xla//third_party/gpus:sycl_configure.bzl", "sycl_configure")
+load("@local_xla//third_party/highwayhash:workspace.bzl", highwayhash = "repo")
 load("@local_xla//third_party/hwloc:workspace.bzl", hwloc = "repo")
 load("@local_xla//third_party/implib_so:workspace.bzl", implib_so = "repo")
 load("@local_xla//third_party/nanobind:workspace.bzl", nanobind = "repo")
@@ -41,7 +42,6 @@ load("//tensorflow/tools/toolchains/remote_config:configs.bzl", "initialize_rbe_
 load("//third_party:repo.bzl", "tf_http_archive", "tf_mirror_urls")
 load("//third_party/flatbuffers:workspace.bzl", flatbuffers = "repo")
 load("//third_party/hexagon:workspace.bzl", hexagon_nn = "repo")
-load("//third_party/highwayhash:workspace.bzl", highwayhash = "repo")
 load("//third_party/icu:workspace.bzl", icu = "repo")
 load("//third_party/jpeg:workspace.bzl", jpeg = "repo")
 load("//third_party/kissfft:workspace.bzl", kissfft = "repo")
@@ -877,16 +877,16 @@ def _tf_repositories():
     # third_party/py/riegeli) that are used in TF.
     tf_http_archive(
         name = "riegeli",
-        sha256 = "eb56368777297b23686ffdb1edbe96af85f88c74cba74a7557518fe3bb7a4aeb",
-        strip_prefix = "riegeli-dc364cecf108d151f52b0a810657e43451be0ebf",
-        urls = tf_mirror_urls("https://github.com/google/riegeli/archive/dc364cecf108d151f52b0a810657e43451be0ebf.zip"),
+        sha256 = "590ec559107fc7082e1a7d70e9c9bfb8624c79dabca0a05fe1bcba1d7a591ec8",
+        strip_prefix = "riegeli-a37c3dbdd5d2a15113d363c7a7c41c30453e482f",
+        urls = tf_mirror_urls("https://github.com/google/riegeli/archive/a37c3dbdd5d2a15113d363c7a7c41c30453e482f.zip"),
     )
 
     tf_http_archive(
         name = "riegeli_py",
-        sha256 = "eb56368777297b23686ffdb1edbe96af85f88c74cba74a7557518fe3bb7a4aeb",
-        strip_prefix = "riegeli-dc364cecf108d151f52b0a810657e43451be0ebf",
-        urls = tf_mirror_urls("https://github.com/google/riegeli/archive/dc364cecf108d151f52b0a810657e43451be0ebf.zip"),
+        sha256 = "590ec559107fc7082e1a7d70e9c9bfb8624c79dabca0a05fe1bcba1d7a591ec8",
+        strip_prefix = "riegeli-a37c3dbdd5d2a15113d363c7a7c41c30453e482f",
+        urls = tf_mirror_urls("https://github.com/google/riegeli/archive/a37c3dbdd5d2a15113d363c7a7c41c30453e482f.zip"),
     )
 
     # Required by riegeli.
