@@ -102,13 +102,21 @@ class CommonPjRtClient : public PjRtClient {
         "CreateLinkedEventPromise is not supported");
   }
 
+  // Create a promise with potentially attached debug_info (if
+  // event_tracking_enabled()).
+  virtual PjRtFuture<>::Promise CreateUserPromise(PjRtMemorySpace* memory_space,
+                                                  absl::string_view debug_info);
+  // Creates a future from a promise PjRtFuture<>(promise) but with event
+  // tracking and traceme scopes.
+  virtual PjRtFuture<> CreateFutureFromUserPromise(
+      PjRtMemorySpace* memory_space, const char* callee_type,
+      const char* callee_method, PjRtFuture<>::Promise promise);
   // Create a linked PjRtFuture<> and ::Promise pair for operations on
   // buffers in memory_space which populates debug information like linked
   // tracmes.
-  virtual std::pair<PjRtFuture<>::Promise, PjRtFuture<>>
-  CreateLinkedUserPromise(PjRtMemorySpace* memory_space,
-                          const char* callee_type, const char* callee_method,
-                          absl::string_view debug_info);
+  std::pair<PjRtFuture<>::Promise, PjRtFuture<>> CreateLinkedUserPromise(
+      PjRtMemorySpace* memory_space, const char* callee_type,
+      const char* callee_method, absl::string_view debug_info);
   template <typename T, std::enable_if_t<std::is_invocable_v<T>, bool> = true>
   absl::StatusOr<std::pair<tsl::RCReference<PjRtDeviceEventPromise>,
                            tsl::RCReference<PjRtDeviceEvent>>>
@@ -127,6 +135,14 @@ class CommonPjRtClient : public PjRtClient {
   virtual tsl::AsyncValueRef<bool> CreateAllocationEventForTransfers(
       PjRtMemorySpace* memory_space,
       const std::optional<std::string>& debug_info);
+
+  // Returns the shape+layout that would result from copying a buffer of
+  // shape+layout shape from src_memory_space to dst_memory_space.
+  virtual absl::StatusOr<xla::Shape> GetCopyDestinationShape(
+      const xla::Shape& shape, PjRtMemorySpace* src_memory_space,
+      PjRtMemorySpace* dst_memory_space);
+
+  virtual bool IsOnCpu(PjRtMemorySpace* memory_space) { return false; }
 
   absl::StatusOr<std::unique_ptr<PjRtBuffer>> BufferFromHostBuffer(
       const void* data, PrimitiveType type, absl::Span<int64_t const> dims,
@@ -193,10 +209,16 @@ class CommonPjRtBufferImpl : public CommonPjRtBuffer {
   void CopyToRemoteDevice(PjRtFuture<std::string> serialized_descriptor,
                           RemoteSendCallback on_done) override;
 
+  absl::StatusOr<std::unique_ptr<PjRtBuffer>> CopyToMemorySpace(
+      PjRtMemorySpace* dst_memory_space) override;
+
   // This behaves like CopyToMemorySpace for memory space pairs which
   // require no layout changes.
   absl::StatusOr<std::unique_ptr<PjRtBuffer>> DirectCopyToMemorySpace(
       PjRtMemorySpace* dst_memory_space);
+
+  absl::StatusOr<std::unique_ptr<PjRtBuffer>> CopyToCpuMemorySpace(
+      const xla::Shape& shape, PjRtMemorySpace* dst_memory_space);
 
   using PjRtBuffer::ToLiteralSync;
   PjRtFuture<> ToLiteral(MutableLiteralBase* literal) override;
@@ -216,6 +238,8 @@ class CommonPjRtBufferImpl : public CommonPjRtBuffer {
                                    int64_t transfer_size) override;
 
   void Delete() override;
+
+  bool IsOnCpu() const override;
 
  protected:
   // Shared implementation for ToLiteral and LazyToLiteral. If `literal` is
