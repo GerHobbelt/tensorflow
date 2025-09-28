@@ -233,6 +233,7 @@ cc_library(
         "//xla/service:shaped_buffer",
         "//xla/stream_executor:device_memory",
         "//xla/stream_executor:device_memory_allocator",
+        "//xla/stream_executor:stream_executor_h",
         "//xla/tsl/concurrency:async_value",
         "//xla/tsl/framework:allocator",
         "//xla/tsl/platform:statusor",
@@ -326,6 +327,7 @@ cc_library(
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/synchronization",
+        "@local_tsl//tsl/profiler/lib:traceme",
     ],
 )
 

@@ -359,7 +359,7 @@ class IfrtBackendHandlerTest : public IfrtBackendTest {
     TF_ASSIGN_OR_RETURN(*compile_request->mutable_compile_options(),
                         Serialize(compile_options, /*options=*/nullptr));
 
-    EXPECT_CALL(mock_compiler_, Compile(_, _))
+    EXPECT_CALL(mock_compiler_, CompileAndLoad(_, _))
         .WillOnce(Return(ByMove(std::move(loaded_executable))));
 
     TF_ASSIGN_OR_RETURN(std::shared_ptr<IfrtResponse> response,
@@ -1527,54 +1527,6 @@ TEST_P(IfrtBackendHandlerTest, LoadedExecutableExecuteErrorWithClientHandles) {
   }
 }
 
-// TODO(b/315809436): Test needs rewrite because protobuf matchers are not OSS
-#if defined(PLATFORM_GOOGLE)
-TEST_P(IfrtBackendHandlerTest, LoadedExecutableDelete) {
-  MockLoadedExecutable* executable;
-  uint64_t handle;
-  {
-    auto e = std::make_unique<MockLoadedExecutable>();
-    executable = e.get();
-    TF_ASSERT_OK_AND_ASSIGN(CompileResponse response,
-                            CompileTestLoadedExecutable(std::move(e)));
-    handle = response.loaded_executable_handle();
-  }
-
-  {
-    EXPECT_CALL(*executable, Delete())
-        .WillOnce(Return(Future<>(absl::OkStatus())));
-
-    auto request = NewIfrtRequest(NewOpId());
-    LoadedExecutableDeleteRequest* delete_request =
-        request->mutable_loaded_executable_delete_request();
-    delete_request->set_loaded_executable_handle(handle);
-
-    TF_ASSERT_OK_AND_ASSIGN(std::shared_ptr<IfrtResponse> response,
-                            CallBackend(std::move(request)));
-    ASSERT_TRUE(response->has_loaded_executable_delete_response());
-
-    EXPECT_THAT(
-        CheckFuture(
-            response->loaded_executable_delete_response().future_handle()),
-        IsOk());
-  }
-
-  {
-    EXPECT_CALL(*executable, IsDeleted()).WillOnce(Return(true));
-
-    auto request = NewIfrtRequest(NewOpId());
-    LoadedExecutableIsDeletedRequest* is_deleted_request =
-        request->mutable_loaded_executable_is_deleted_request();
-    is_deleted_request->set_loaded_executable_handle(handle);
-
-    EXPECT_THAT(CallBackend(std::move(request)),
-                IsOkAndHolds(Pointee(Partially(EquivToProto(R"pb(
-                  loaded_executable_is_deleted_response { is_deleted: true }
-                )pb")))));
-  }
-}
-#endif
-
 TEST_P(IfrtBackendHandlerTest, LoadedExecutableDestruct) {
   MockLoadedExecutable* executable;
   uint64_t handle;
@@ -1653,7 +1605,7 @@ TEST_P(IfrtBackendHandlerTest, LoadedHostCallbackExecute) {
     auto e = std::make_unique<MockLoadedExecutable>();
     executable = e.get();
 
-    EXPECT_CALL(mock_compiler_, Compile(_, _))
+    EXPECT_CALL(mock_compiler_, CompileAndLoad(_, _))
         .WillOnce(DoAll(
             Invoke(
                 [&](const std::unique_ptr<xla::ifrt::Program>& program,

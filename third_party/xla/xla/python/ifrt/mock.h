@@ -197,12 +197,12 @@ class MockClient : public llvm::RTTIExtends<MockClient, Client> {
 
 class MockCompiler : public llvm::RTTIExtends<MockCompiler, Compiler> {
  public:
-  MOCK_METHOD(absl::StatusOr<LoadedExecutableRef>, Compile,
-              (std::unique_ptr<Program> program,
-               std::unique_ptr<CompileOptions> options),
-              (final));
   MOCK_METHOD(absl::StatusOr<ExecutableRef>, Compile,
               (std::unique_ptr<Program> program, const Topology& topology,
+               std::unique_ptr<CompileOptions> options),
+              (final));
+  MOCK_METHOD(absl::StatusOr<LoadedExecutableRef>, CompileAndLoad,
+              (std::unique_ptr<Program> program,
                std::unique_ptr<CompileOptions> options),
               (final));
   MOCK_METHOD(absl::StatusOr<LoadedExecutableRef>, DeserializeLoadedExecutable,
@@ -317,8 +317,6 @@ class MockLoadedExecutable
               (absl::Span<ArrayRef> args, const ExecuteOptions& options,
                std::optional<DeviceListRef> devices),
               (final));
-  MOCK_METHOD(Future<>, Delete, (), (final));
-  MOCK_METHOD(bool, IsDeleted, (), (const, final));
   MOCK_METHOD(absl::Span<Device* const>, addressable_devices, (),
               (const, final));
 
