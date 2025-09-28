@@ -274,7 +274,8 @@ cc_library(
     hdrs = ["hlo_pjrt_interpreter_reference_mixin.h"],
     deps = [
         ":hlo_runner_agnostic_reference_mixin",
-        "//xla/pjrt/interpreter:interpreter_client",
+        ":split_phase_utils",
+        "//xla/hlo/evaluator:hlo_evaluator",
         "//xla/service:hlo_runner_pjrt",
     ],
 )
@@ -3352,6 +3353,7 @@ xla_test(
     backend_tags = {
         "cpu": ["optonly"],
     },
+    precompile_test = False,  # TODO: b/438544287 - Re-enable once fixed.
     shard_count = 50,
     tags = [
         "test_migrated_to_hlo_runner_pjrt",
@@ -3690,9 +3692,13 @@ cc_library(
     srcs = ["split_phase_utils.cc"],
     hdrs = ["split_phase_utils.h"],
     deps = [
+        "//xla/hlo/evaluator:caching_hlo_evaluator",
+        "//xla/hlo/evaluator:hlo_evaluator_interface",
         "//xla/pjrt:pjrt_client",
+        "//xla/pjrt/interpreter:interpreter_client",
         "//xla/service:hlo_runner_pjrt",
         "@com_google_absl//absl/flags:flag",
+        "@com_google_absl//absl/functional:any_invocable",
         "@com_google_absl//absl/strings:string_view",
     ],
 )
