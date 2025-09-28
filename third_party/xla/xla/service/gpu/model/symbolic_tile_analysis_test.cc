@@ -16,6 +16,7 @@ limitations under the License.
 #include "xla/service/gpu/model/symbolic_tile_analysis.h"
 
 #include <cstdint>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <string>
@@ -26,6 +27,7 @@ limitations under the License.
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include "absl/algorithm/container.h"
+#include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
@@ -34,6 +36,7 @@ limitations under the License.
 #include "absl/types/span.h"
 #include "mlir/IR/MLIRContext.h"
 #include "xla/hlo/analysis/indexing_test_utils.h"
+#include "xla/hlo/ir/hlo_instructions.h"
 #include "xla/hlo/ir/hlo_module.h"
 #include "xla/hlo/ir/hlo_opcode.h"
 #include "xla/hlo/parser/hlo_parser.h"
@@ -55,7 +58,7 @@ namespace xla {
 namespace gpu {
 namespace {
 
-using detail::GetGoodTilings;
+using detail::GetFlatTilingsForInputSpace;
 using ::testing::ElementsAre;
 using ::testing::ElementsAreArray;
 using ::testing::ExplainMatchResult;
@@ -64,7 +67,7 @@ using ::testing::Matcher;
 using ::testing::Not;
 using ::tsl::testing::IsOkAndHolds;
 using ::tsl::testing::StatusIs;
-using TilingVector = std::vector<SymbolicTileAnalysis::Tiling>;
+using TilingVector = std::vector<FlatTiling>;
 
 MATCHER_P3(MatchTiledHloInstructionImpl, tile_sizes, tile_strides,
            tile_offsets_indexing, "") {
@@ -96,6 +99,23 @@ MATCHER_P2(InstructionMapping, instruction, num_tiling_parameters,
   return ExplainMatchResult(instruction, arg.instruction, result_listener) &&
          ExplainMatchResult(num_tiling_parameters, arg.num_tiling_parameters,
                             result_listener);
+}
+
+// Returns a map from parameter number to the tiled instruction corresponding to
+// the parameter. Note that parameters and their indexing are coming from the
+// ENTRY computation not from the fusion.
+absl::flat_hash_map<int64_t, const TiledHloInstruction*> GetParametersTiling(
+    const TiledHloComputation* tiled_hlo_computation) {
+  absl::flat_hash_map<int64_t, const TiledHloInstruction*> result;
+  for (const auto& instruction : tiled_hlo_computation->instructions()) {
+    const HloParameterInstruction* parameter =
+        dynamic_cast<const HloParameterInstruction*>(instruction->hlo());
+    if (!parameter) {
+      continue;
+    }
+    result[parameter->parameter_number()] = instruction;
+  }
+  return result;
 }
 
 // Fake emitter-specific constraints for testing. Requires that the tile size
@@ -1015,26 +1035,23 @@ ENTRY main {
                                "d0 mod 6 in [0, 0] && d1 mod 8 in [0, 0]"));
 }
 
-bool AlwaysValid(absl::Span<const int64_t>) { return true; }
-
-TEST(GetGoodTilingsTest, ReturnsOneTilingWhenRankIsZero) {
-  EXPECT_EQ(GetGoodTilings({}, AlwaysValid),
-            TilingVector{SymbolicTileAnalysis::Tiling{}});
+TEST(GetValidTilingsTest, ReturnsOneTilingWhenRankIsZero) {
+  EXPECT_EQ(GetFlatTilingsForInputSpace({}), TilingVector{FlatTiling{}});
 }
 
-TEST(GetGoodTilingsTest, ReturnsPowersOfTwoAndTheDimSizeForRankOne) {
-  EXPECT_EQ(GetGoodTilings({1}, AlwaysValid), TilingVector{{1}});
-  EXPECT_EQ(GetGoodTilings({2}, AlwaysValid), TilingVector({{1}, {2}}));
-  EXPECT_EQ(GetGoodTilings({3}, AlwaysValid), TilingVector({{1}, {2}, {3}}));
-  EXPECT_EQ(GetGoodTilings({4}, AlwaysValid), TilingVector({{1}, {2}, {4}}));
-  EXPECT_EQ(GetGoodTilings({5}, AlwaysValid),
+TEST(GetValidTilingsTest, ReturnsPowersOfTwoAndTheDimSizeForRankOne) {
+  EXPECT_EQ(GetFlatTilingsForInputSpace({1}), TilingVector{{1}});
+  EXPECT_EQ(GetFlatTilingsForInputSpace({2}), TilingVector({{1}, {2}}));
+  EXPECT_EQ(GetFlatTilingsForInputSpace({3}), TilingVector({{1}, {2}, {3}}));
+  EXPECT_EQ(GetFlatTilingsForInputSpace({4}), TilingVector({{1}, {2}, {4}}));
+  EXPECT_EQ(GetFlatTilingsForInputSpace({5}),
             TilingVector({{1}, {2}, {4}, {5}}));
-  EXPECT_EQ(GetGoodTilings({11}, AlwaysValid),
+  EXPECT_EQ(GetFlatTilingsForInputSpace({11}),
             TilingVector({{1}, {2}, {4}, {8}, {11}}));
 }
 
-TEST(GetGoodTilingsTest, CreatesCartesianProductForRankTwo) {
-  EXPECT_EQ(GetGoodTilings({3, 4}, AlwaysValid), TilingVector({{1, 1},
+TEST(GetValidTilingsTest, CreatesCartesianProductForRankTwo) {
+  EXPECT_EQ(GetFlatTilingsForInputSpace({3, 4}), TilingVector({{1, 1},
                                                                {1, 2},
                                                                {1, 4},
                                                                {2, 1},
@@ -1045,8 +1062,8 @@ TEST(GetGoodTilingsTest, CreatesCartesianProductForRankTwo) {
                                                                {3, 4}}));
 }
 
-TEST(GetGoodTilingsTest, CreatesCartesianProductForRankThree) {
-  EXPECT_EQ(GetGoodTilings({3, 4, 2}, AlwaysValid), TilingVector({{1, 1, 1},
+TEST(GetValidTilingsTest, CreatesCartesianProductForRankThree) {
+  EXPECT_EQ(GetFlatTilingsForInputSpace({3, 4, 2}), TilingVector({{1, 1, 1},
                                                                   {1, 1, 2},
                                                                   {1, 2, 1},
                                                                   {1, 2, 2},
@@ -1066,26 +1083,23 @@ TEST(GetGoodTilingsTest, CreatesCartesianProductForRankThree) {
                                                                   {3, 4, 2}}));
 }
 
-TEST(GetGoodTilingsTest, FiltersTheTilingsUsingThePredicate) {
-  auto all_even = [](absl::Span<const int64_t> tile_sizes) {
-    return absl::c_all_of(tile_sizes,
-                          [](int64_t tile_size) { return tile_size % 2 == 0; });
-  };
+// Helper to transform a sequence of `Tiling`s into a sequence of equivalent
+// `FlatTiling`s.
+std::vector<FlatTiling> FlattenTilings(
+    absl::Span<const Tiling> tilings,
+    const TilingSpecification& tiling_specification) {
+  std::vector<FlatTiling> flat_tilings;
+  flat_tilings.reserve(tilings.size());
 
-  EXPECT_EQ(GetGoodTilings({3, 4}, all_even), TilingVector({{2, 2}, {2, 4}}));
-
-  auto all_equal = [](absl::Span<const int64_t> tile_sizes) {
-    return absl::c_all_of(tile_sizes, [&](int64_t tile_size) {
-      return tile_size == tile_sizes.at(0);
-    });
-  };
-
-  EXPECT_EQ(GetGoodTilings({3, 3, 3}, all_equal),
-            TilingVector({{1, 1, 1}, {2, 2, 2}, {3, 3, 3}}));
+  absl::c_transform(tilings, std::back_inserter(flat_tilings),
+                    [&](const Tiling& tiling) {
+                      return tiling.Flatten(tiling_specification).value();
+                    });
+  return flat_tilings;
 }
 
 TEST_F(SymbolicTileAnalysisTest,
-       GetGoodTilingsWorksTakingConstraintsIntoAccount) {
+       GetValidTilingsWorksTakingConstraintsIntoAccount) {
   // The module was chosen (from SymbolicTileTest) because it has a constraint
   // on the tile sizes.
   TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<VerifiedHloModule> module,
@@ -1105,16 +1119,15 @@ ENTRY main {
   ASSERT_TRUE(opt_analysis.has_value());
 
   const SymbolicTileAnalysis& analysis = opt_analysis.value();
-  TF_ASSERT_OK_AND_ASSIGN(
-      std::vector<SymbolicTileAnalysis::Tiling> good_tilings,
-      analysis.GetGoodTilings());
+  TF_ASSERT_OK_AND_ASSIGN(std::vector<Tiling> valid_tilings,
+                          analysis.GetValidTilings());
   // The constraint on the 1st dimension is
   //   6 mod d0 in [0, 0] || d0 mod 6 in [0, 0],
   // and only 48, 1, and 2 fulfill it from the set of possible tile sizes
   // (1, 2, 4, 8, 16, 32, 48).
   // There is no constraint on the 2nd dimension.
-  EXPECT_EQ(good_tilings, std::vector<SymbolicTileAnalysis::Tiling>(
-                              {{1, 1}, {2, 1}, {48, 1}}));
+  EXPECT_EQ(FlattenTilings(valid_tilings, analysis.GetTilingSpecification()),
+            std::vector<FlatTiling>({{1, 1}, {2, 1}, {48, 1}}));
 }
 
 // Logs the tilings if VLOG level 1 is enabled.
@@ -1123,17 +1136,19 @@ ENTRY main {
 // --test_output=all
 // --test_arg=--logtostderr
 // --test_arg=--vmodule=symbolic_tile_analysis_test=1
-void LogTilingsIfVlog1(absl::Span<const SymbolicTileAnalysis::Tiling> tilings) {
+void LogTilingsIfVlog1(absl::Span<const Tiling> tilings,
+                       const TilingSpecification& tiling_specification) {
   if (VLOG_IS_ON(1)) {
     LOG(INFO) << "Tilings: {";
-    for (const SymbolicTileAnalysis::Tiling& tiling : tilings) {
-      LOG(INFO) << "{" << absl::StrJoin(tiling, ",") << "},";
+    for (const FlatTiling& flattened_tiling :
+         FlattenTilings(tilings, tiling_specification)) {
+      LOG(INFO) << "{" << absl::StrJoin(flattened_tiling, ",") << "},";
     }
     LOG(INFO) << "}";
   }
 }
 
-TEST_F(SymbolicTileAnalysisTest, GetGoodTilingsWorksForSoftmaxExample) {
+TEST_F(SymbolicTileAnalysisTest, GetValidTilingsWorksForSoftmaxExample) {
   // The example is from
   // https://github.com/google/paxml/blob/91893818862645f5e9f23b84f530e611551745f6/paxml/contrib/gpu/scripts_gpu/configs.py#L107-L120.
   TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<VerifiedHloModule> module,
@@ -1179,15 +1194,14 @@ ENTRY entry_computation {
   ASSERT_TRUE(opt_analysis.has_value());
   const SymbolicTileAnalysis& analysis = opt_analysis.value();
 
-  TF_ASSERT_OK_AND_ASSIGN(
-      std::vector<SymbolicTileAnalysis::Tiling> good_tilings,
-      analysis.GetGoodTilings());
-  EXPECT_THAT(good_tilings, Not(IsEmpty()));
-  LogTilingsIfVlog1(good_tilings);
+  TF_ASSERT_OK_AND_ASSIGN(std::vector<Tiling> valid_tilings,
+                          analysis.GetValidTilings());
+  EXPECT_THAT(valid_tilings, Not(IsEmpty()));
+  LogTilingsIfVlog1(valid_tilings, analysis.GetTilingSpecification());
 }
 
 TEST_F(SymbolicTileAnalysisTest,
-       GetGoodTilingsWorksForSoftmaxAndReduceExample) {
+       GetValidTilingsWorksForSoftmaxAndReduceExample) {
   // The example is from
   // https://github.com/google/paxml/blob/91893818862645f5e9f23b84f530e611551745f6/paxml/contrib/gpu/scripts_gpu/configs.py#L107-L120.
   TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<VerifiedHloModule> module,
@@ -1243,11 +1257,10 @@ ENTRY entry_computation {
   ASSERT_TRUE(opt_analysis.has_value());
   const SymbolicTileAnalysis& analysis = opt_analysis.value();
 
-  TF_ASSERT_OK_AND_ASSIGN(
-      std::vector<SymbolicTileAnalysis::Tiling> good_tilings,
-      analysis.GetGoodTilings());
-  EXPECT_THAT(good_tilings, Not(IsEmpty()));
-  LogTilingsIfVlog1(good_tilings);
+  TF_ASSERT_OK_AND_ASSIGN(std::vector<Tiling> valid_tilings,
+                          analysis.GetValidTilings());
+  EXPECT_THAT(valid_tilings, Not(IsEmpty()));
+  LogTilingsIfVlog1(valid_tilings, analysis.GetTilingSpecification());
 }
 
 // This test means to catch integer overflow errors when run with ASan build.
@@ -1511,6 +1524,67 @@ ENTRY e {
                        /*tile_offsets_indexing=*/R"(
     (pid_0) -> (), domain: pid_0 in [0, 0]
   )"));
+}
+
+TEST_F(SymbolicTileAnalysisTest, AnalyzeReduceOfDynamicSlice) {
+  // Tiling of parameter 0 has a runtime variable and a range variable in the
+  // constraints. Test verifies that constraints are updated along with the
+  // indexing map. Regression test for b/425379905.
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<VerifiedHloModule> module,
+                          ParseAndReturnVerifiedModule(R"(
+f_add {
+  p0 = f32[] parameter(0)
+  p1 = f32[] parameter(1)
+  ROOT add = f32[] add(p0, p1)
+}
+
+triton_softmax {
+  p0 = bf16[1024,512]{1,0} parameter(0)
+  select = s32[] parameter(1)
+  c_0 = s32[] constant(0)
+  dynamic_slice = bf16[256,512]{1,0} dynamic-slice(p0, select, c_0), dynamic_slice_sizes={256,512}
+  convert = f32[256,512] convert(dynamic_slice)
+  bitcast_1 = f32[32,8,8,64] bitcast(convert)
+  c_1 = f32[] constant(0)
+  reduce = f32[32,8,8] reduce(bitcast_1, c_1), dimensions={3}, to_apply=f_add
+  bitcast_2 = bf16[32,8,8] convert(reduce)
+  ROOT broadcast = bf16[1,32,8,8,64] broadcast(bitcast_2), dimensions={1,2,3}
+}
+
+ENTRY e {
+  p0 = bf16[1024,512]{1,0} parameter(0)
+  select = s32[] parameter(1)
+  ROOT triton_softmax = bf16[1,32,8,8,64] fusion(p0,  select), kind=kCustom, calls=triton_softmax,
+    backend_config={"fusion_backend_config":{"kind":"__triton"}}
+}
+)"));
+
+  std::optional<SymbolicTileAnalysis> analysis = TryAnalyzeModule(module.get());
+  ASSERT_TRUE(analysis.has_value());
+
+  const HloInstruction* root =
+      module->entry_computation()->root_instruction()->fused_expression_root();
+  ASSERT_TRUE(analysis.has_value());
+  Tiling tiling = Tiling(Tiling::TileMapping({{root, {1, 1, 1, 1, 32}}}));
+  TF_ASSERT_OK_AND_ASSIGN(TiledHloComputation tiled_hlo_computation,
+                          analysis->ComputeTiledHloInstructions(
+                              /*tiling=*/tiling,
+                              /*constraints_are_known_satisfied=*/false,
+                              /*compute_all_tile_offset_indexing_maps=*/true));
+  absl::flat_hash_map<int64_t, const TiledHloInstruction*> parameter_tiling =
+      GetParametersTiling(&tiled_hlo_computation);
+  EXPECT_THAT(*parameter_tiling[0], MatchTiledHloInstruction(
+                                        /*tile_sizes=*/{1, 64},
+                                        /*tile_strides=*/{0, 1},
+                                        /*tile_offsets_indexing=*/R"(
+    (pid_0){rt0} -> (pid_0 floordiv 16 + rt0, ((pid_0 floordiv 2) mod 8) * 64),
+      domain: pid_0 in [0, 4095], rt0 in [0, 768]
+  )"));
+  EXPECT_THAT(*parameter_tiling[1], MatchTiledHloInstruction(
+                                        /*tile_sizes=*/{},
+                                        /*tile_strides=*/{},
+                                        /*tile_offsets_indexing=*/R"(
+    (pid_0) -> (), domain: pid_0 in [0, 4095])"));
 }
 
 TEST_F(SymbolicTileAnalysisTest, AnalyseNestedFusionWithRuntimeVariables) {
