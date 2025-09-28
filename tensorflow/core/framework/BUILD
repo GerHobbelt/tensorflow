@@ -843,17 +843,7 @@ tf_cuda_library(
         "variant_op_registry.h",
         "variant_tensor_data.h",
     ],
-    visibility = [
-        "//learning/gemini/gemax/core/models/gemini3/vision/vision_decoder:__pkg__",
-        "//learning/infra/runtime/experimental/mixed_engine:__subpackages__",
-        "//tensorflow:__pkg__",
-        "//tensorflow/core:__pkg__",
-        "//tensorflow/core/runtime_fallback:__subpackages__",
-        "//tensorflow/core/tfrt:__subpackages__",
-        "//tensorflow/core/util:__pkg__",
-        "//tensorflow/python/profiler/internal:__pkg__",
-        "//tensorflow/security/fuzzing:__subpackages__",
-    ],
+    visibility = ["//visibility:public"],
     deps = [
         ":allocation_description_proto_cc",
         ":allocator",
