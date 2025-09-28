@@ -13,8 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_PJRT_GPU_RAW_BUFFER_H_
-#define XLA_PJRT_GPU_RAW_BUFFER_H_
+#ifndef XLA_PJRT_SE_RAW_BUFFER_H_
+#define XLA_PJRT_SE_RAW_BUFFER_H_
 
 #include <cstddef>
 #include <cstdint>
@@ -29,6 +29,32 @@ limitations under the License.
 
 namespace xla {
 
+class PjRtStreamExecutorDeviceEvent : public PjRtDeviceEvent {
+ public:
+  explicit PjRtStreamExecutorDeviceEvent(
+      tsl::AsyncValueRef<BufferSequencingEvent> event,
+      const char* callee_type = "CpuTrackedDeviceEvent",
+      const char* callee_method = "Unknown")
+      : event_(std::move(event)),
+        callee_type_(callee_type),
+        callee_method_(callee_method) {}
+
+  const tsl::AsyncValueRef<BufferSequencingEvent>& event() const {
+    return event_;
+  }
+
+  tsl::AsyncValue* async_value() const override {
+    return event_.GetAsyncValue();
+  }
+
+  PjRtFuture<> GetReadyFuture() override;
+
+ private:
+  tsl::AsyncValueRef<BufferSequencingEvent> event_;
+  const char* callee_type_;
+  const char* callee_method_;
+};
+
 class PjRtStreamExecutorRawBuffer : public PjRtRawBuffer {
  public:
   PjRtStreamExecutorRawBuffer(PjRtStreamExecutorClient* client,
@@ -40,6 +66,11 @@ class PjRtStreamExecutorRawBuffer : public PjRtRawBuffer {
         local_device_(local_device),
         device_buffer_(device_buffer) {}
   PjRtMemorySpace* memory_space() const override { return memory_space_; }
+
+  void* GetHostPointer() const override {
+    return client_->IsOnCpu(memory_space()) ? device_buffer_->opaque()
+                                            : nullptr;
+  }
 
   size_t GetOnDeviceSizeInBytes() const override {
     return device_buffer_->mem().size();
@@ -60,4 +91,4 @@ class PjRtStreamExecutorRawBuffer : public PjRtRawBuffer {
 
 }  // namespace xla
 
-#endif  // XLA_PJRT_GPU_RAW_BUFFER_H_
+#endif  // XLA_PJRT_SE_RAW_BUFFER_H_

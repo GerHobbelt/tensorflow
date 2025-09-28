@@ -228,6 +228,7 @@ cc_library(
         "//xla/tsl/platform:statusor",
         "//xla/tsl/platform:test",
         "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
@@ -3353,7 +3354,6 @@ xla_test(
     backend_tags = {
         "cpu": ["optonly"],
     },
-    precompile_test = False,  # TODO: b/438544287 - Re-enable once fixed.
     shard_count = 50,
     tags = [
         "test_migrated_to_hlo_runner_pjrt",
