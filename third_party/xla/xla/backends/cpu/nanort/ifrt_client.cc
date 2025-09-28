@@ -113,14 +113,15 @@ ifrt::Future<> Ready(absl::Status status = absl::OkStatus()) {
 template <typename Self, typename Base>
 class NanoValue : public llvm::RTTIExtends<Self, Base> {
  public:
-  explicit NanoValue(NanoIfrtClient* client) : client_(client) {}
+  explicit NanoValue(NanoIfrtClient* client)
+      : client_(client), user_context_(ifrt::UserContextScope::current()) {}
 
   ifrt::Client* client() const override { return client_; }
 
   // Called by subclasses to get access to client() without having to cast.
   NanoIfrtClient* nano_client() const { return client_; }
 
-  ifrt::UserContextRef user_context() const override { return {}; }
+  ifrt::UserContextRef user_context() const override { return user_context_; }
 
   // All nano values are immediately ready.
   ifrt::Future<> GetReadyFuture() const override { return Ready(); }
@@ -141,6 +142,7 @@ class NanoValue : public llvm::RTTIExtends<Self, Base> {
 
  private:
   NanoIfrtClient* client_;
+  const ifrt::UserContextRef user_context_;
 };
 
 // Array implementation.
@@ -1231,9 +1233,7 @@ absl::StatusOr<ifrt::ArrayRef> NanoIfrtClient::MakeArrayFromHostBuffer(
     const void* data, ifrt::DType dtype, ifrt::Shape shape,
     std::optional<absl::Span<const int64_t>> byte_strides,
     ifrt::ShardingRef sharding, HostBufferSemantics semantics,
-    std::function<void()> on_done_with_host_buffer,
-    tsl::RCReference<ifrt::UserContext> user_context) {
-  // Currently the `user_context` parameter is ignored.
+    std::function<void()> on_done_with_host_buffer) {
   bool make_copy = false;
   switch (semantics) {
     case HostBufferSemantics::kImmutableUntilTransferCompletes:
@@ -1254,15 +1254,12 @@ absl::StatusOr<ifrt::ArrayRef> NanoIfrtClient::MakeArrayFromHostBuffer(
 absl::StatusOr<std::vector<ifrt::ArrayRef>>
 NanoIfrtClient::MakeArraysFromHostBufferShards(
     absl::Span<MakeArraysFromHostBufferShardsSpec> specs,
-    HostBufferSemantics semantics,
-    tsl::RCReference<ifrt::UserContext> user_context) {
-  return ifrt::ClientMakeArraysFromHostBufferShards(this, specs, semantics,
-                                                    std::move(user_context));
+    HostBufferSemantics semantics) {
+  return ifrt::ClientMakeArraysFromHostBufferShards(this, specs, semantics);
 }
 
 absl::StatusOr<std::vector<ifrt::ArrayRef>> NanoIfrtClient::MakeErrorArrays(
-    const absl::Status& error, absl::Span<const ifrt::ArraySpec> array_specs,
-    tsl::RCReference<ifrt::UserContext> user_context) {
+    const absl::Status& error, absl::Span<const ifrt::ArraySpec> array_specs) {
   return absl::UnimplementedError(
       "NanoIfrtClient does not support MakeErrorArrays.");
 }
