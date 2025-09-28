@@ -40,8 +40,7 @@ TEST(PjRtFutureTest, ValueConstructedFuture) {
 }
 
 TEST(PjRtFutureTest, StatelessFuture) {
-  auto promise = PjRtFuture<>::CreatePromise();
-  PjRtFuture<> future(promise);
+  auto [promise, future] = PjRtFuture<>::MakePromise();
 
   EXPECT_FALSE(future.IsReady());
   promise.Set();
@@ -51,6 +50,50 @@ TEST(PjRtFutureTest, StatelessFuture) {
 
   future.OnReady(
       [](absl::Status status) { EXPECT_EQ(status, absl::OkStatus()); });
+}
+
+TEST(PjRtFutureTest, StatefulFutureToStateless) {
+  auto promise = PjRtFuture<int32_t>::CreatePromise();
+  PjRtFuture<int32_t> future(promise);
+  PjRtFuture<> on_ready_future = future.GetReadyFuture();
+
+  EXPECT_FALSE(on_ready_future.IsReady());
+  promise.Set(42);
+  EXPECT_EQ(on_ready_future.Await(), absl::OkStatus());
+}
+
+TEST(PjRtFutureTest, StatefulFutureToStatelessError) {
+  auto promise = PjRtFuture<int32_t>::CreatePromise();
+  PjRtFuture<int32_t> future(promise);
+  PjRtFuture<> on_ready_future = future.GetReadyFuture();
+
+  EXPECT_FALSE(on_ready_future.IsReady());
+  promise.Set(absl::InternalError("test"));
+  EXPECT_EQ(on_ready_future.Await(), absl::InternalError("test"));
+}
+
+TEST(PjRtFutureTest, MoveOnlyFutureToStateless) {
+  auto promise = PjRtFuture<std::unique_ptr<int32_t>>::CreatePromise();
+  PjRtFuture<std::unique_ptr<int32_t>> future(promise);
+  PjRtFuture<> on_ready_future = future.GetReadyFuture();
+
+  EXPECT_FALSE(future.IsReady());
+  EXPECT_FALSE(on_ready_future.IsReady());
+
+  promise.Set(std::make_unique<int32_t>(42));
+  EXPECT_EQ(on_ready_future.Await(), absl::OkStatus());
+}
+
+TEST(PjRtFutureTest, MoveOnlyFutureToStatelessError) {
+  auto promise = PjRtFuture<std::unique_ptr<int32_t>>::CreatePromise();
+  PjRtFuture<std::unique_ptr<int32_t>> future(promise);
+  PjRtFuture<> on_ready_future = future.GetReadyFuture();
+
+  EXPECT_FALSE(future.IsReady());
+  EXPECT_FALSE(on_ready_future.IsReady());
+
+  promise.Set(absl::InternalError("test"));
+  EXPECT_EQ(on_ready_future.Await(), absl::InternalError("test"));
 }
 
 TEST(PjRtFutureTest, CopyableFuture) {
@@ -118,6 +161,27 @@ TEST(PjRtFutureTest, OnReadyMoveOnlyFuture) {
   std::move(future).OnReady([](absl::StatusOr<std::unique_ptr<int32_t>> value) {
     EXPECT_EQ(**value, 42);
   });
+}
+
+TEST(PjRtFutureTest, PromiseIsUnique) {
+  auto promise = PjRtFuture<>::CreatePromise();
+  EXPECT_TRUE(promise.IsUniqueReference());
+
+  {
+    auto copy = promise;
+    EXPECT_FALSE(promise.IsUniqueReference());
+    EXPECT_FALSE(copy.IsUniqueReference());
+  }
+  EXPECT_TRUE(promise.IsUniqueReference());
+
+  PjRtFuture<> future(promise);
+  EXPECT_FALSE(promise.IsUniqueReference());
+  future.OnReady([](const absl::Status&) {});
+  future = {};
+  EXPECT_FALSE(promise.IsUniqueReference());
+
+  promise.Set();
+  EXPECT_TRUE(promise.IsUniqueReference());
 }
 
 TEST(PjRtFutureTest, MapCopyableFuture) {
@@ -308,8 +372,7 @@ TEST(PjRtFutureTest, TryMapMoveOnlyFutureCreateError) {
 }
 
 TEST(PjRtFutureTest, StatelessError) {
-  auto promise = PjRtFuture<>::CreatePromise();
-  PjRtFuture<> future(promise);
+  auto [promise, future] = PjRtFuture<>::MakePromise();
 
   EXPECT_FALSE(future.IsReady());
   promise.Set(absl::InternalError("test"));
@@ -342,8 +405,7 @@ TEST(PjRtFutureTest, StatelessImmediate) {
 }
 
 TEST(PjRtFutureTest, MapStatelessFuture) {
-  auto promise = PjRtFuture<>::CreatePromise();
-  PjRtFuture<> future(promise);
+  auto [promise, future] = PjRtFuture<>::MakePromise();
   PjRtFuture<float> mapped = future.Map([]() { return 42.0f; });
 
   EXPECT_FALSE(future.IsReady());
@@ -358,8 +420,7 @@ TEST(PjRtFutureTest, MapStatelessFuture) {
 }
 
 TEST(PjRtFutureTest, MapStatelessFutureError) {
-  auto promise = PjRtFuture<>::CreatePromise();
-  PjRtFuture<> future(promise);
+  auto [promise, future] = PjRtFuture<>::MakePromise();
   PjRtFuture<float> mapped = future.Map([]() { return 42.0f; });
 
   EXPECT_FALSE(future.IsReady());
@@ -374,8 +435,7 @@ TEST(PjRtFutureTest, MapStatelessFutureError) {
 }
 
 TEST(PjRtFutureTest, TryMapStatelessFuture) {
-  auto promise = PjRtFuture<>::CreatePromise();
-  PjRtFuture<> future(promise);
+  auto [promise, future] = PjRtFuture<>::MakePromise();
   PjRtFuture<float> mapped =
       future.TryMap([]() -> absl::StatusOr<float> { return 42.0f; });
 
@@ -391,8 +451,7 @@ TEST(PjRtFutureTest, TryMapStatelessFuture) {
 }
 
 TEST(PjRtFutureTest, TryMapStatelessFutureForwardError) {
-  auto promise = PjRtFuture<>::CreatePromise();
-  PjRtFuture<> future(promise);
+  auto [promise, future] = PjRtFuture<>::MakePromise();
   PjRtFuture<float> mapped =
       future.TryMap([]() -> absl::StatusOr<float> { return 42.0f; });
 
@@ -402,8 +461,7 @@ TEST(PjRtFutureTest, TryMapStatelessFutureForwardError) {
 }
 
 TEST(PjRtFutureTest, TryMapStatelessFutureCreateError) {
-  auto promise = PjRtFuture<>::CreatePromise();
-  PjRtFuture<> future(promise);
+  auto [promise, future] = PjRtFuture<>::MakePromise();
   PjRtFuture<float> mapped = future.TryMap(
       []() -> absl::StatusOr<float> { return absl::InternalError("test"); });
 
@@ -413,8 +471,7 @@ TEST(PjRtFutureTest, TryMapStatelessFutureCreateError) {
 }
 
 TEST(PjRtFutureTest, MapToStatelessFuture) {
-  auto promise = PjRtFuture<>::CreatePromise();
-  PjRtFuture<> future(promise);
+  auto [promise, future] = PjRtFuture<>::MakePromise();
   PjRtFuture<float> mapped = future.MapTo(42.0f);
 
   EXPECT_FALSE(future.IsReady());
@@ -440,8 +497,7 @@ TEST(PjRtFutureTest, StatefulFuture) {
 }
 
 TEST(PjRtFutureTest, StatusFuture) {
-  auto promise = PjRtFuture<>::CreatePromise();
-  PjRtFuture<> future(promise);
+  auto [promise, future] = PjRtFuture<>::MakePromise();
 
   EXPECT_FALSE(future.IsReady());
   promise.Set(absl::OkStatus());
@@ -467,12 +523,11 @@ TEST(PjRtFutureTest, JoinFutures) {
   EXPECT_TRUE(empty_join.IsReady());
   EXPECT_EQ(empty_join.Await(), absl::OkStatus());
 
-  auto promise0 = PjRtFuture<>::CreatePromise();
-  auto promise1 = PjRtFuture<>::CreatePromise();
+  auto [promise0, future0] = PjRtFuture<>::MakePromise();
+  auto [promise1, future1] = PjRtFuture<>::MakePromise();
 
-  std::vector<PjRtFuture<>> futures0 = {PjRtFuture<>(promise0)};
-  std::vector<PjRtFuture<>> futures1 = {PjRtFuture<>(promise0),
-                                        PjRtFuture<>(promise1)};
+  std::vector<PjRtFuture<>> futures0 = {future0};
+  std::vector<PjRtFuture<>> futures1 = {future0, future1};
 
   auto join_one = JoinFutures(futures0);
   EXPECT_FALSE(join_one.IsReady());
@@ -495,12 +550,11 @@ TEST(PjRtFutureTest, JoinErrors) {
   EXPECT_TRUE(empty_join.IsReady());
   EXPECT_EQ(empty_join.Await(), absl::OkStatus());
 
-  auto promise0 = PjRtFuture<>::CreatePromise();
-  auto promise1 = PjRtFuture<>::CreatePromise();
+  auto [promise0, future0] = PjRtFuture<>::MakePromise();
+  auto [promise1, future1] = PjRtFuture<>::MakePromise();
 
-  std::vector<PjRtFuture<>> futures0 = {PjRtFuture<>(promise0)};
-  std::vector<PjRtFuture<>> futures1 = {PjRtFuture<>(promise0),
-                                        PjRtFuture<>(promise1)};
+  std::vector<PjRtFuture<>> futures0 = {future0};
+  std::vector<PjRtFuture<>> futures1 = {future0, future1};
 
   auto join_one = JoinFutures(futures0);
   EXPECT_FALSE(join_one.IsReady());
