@@ -5,6 +5,7 @@ load(
     "@local_config_rocm//rocm:build_defs.bzl",
     "if_rocm_is_configured",
 )
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("//xla:xla.default.bzl", "xla_cc_test")
 load("//xla/tests:build_defs.bzl", "xla_test")
 load("//xla/tsl:tsl.default.bzl", "get_compatible_with_portable")
@@ -798,6 +799,7 @@ xla_cc_test(
         "//xla/stream_executor:device_description_proto_cc",
         "//xla/stream_executor:platform",
         "//xla/stream_executor:platform_manager",
+        "//xla/stream_executor:semantic_version",
         "//xla/stream_executor/host:host_platform",
         "//xla/tests:hlo_test_base",
         "//xla/tests:xla_internal_test_main",
