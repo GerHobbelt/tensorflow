@@ -617,7 +617,11 @@ class PjRtCApiLoadedExecutable : public PjRtLoadedExecutable {
   }
 
   const DeviceAssignment& device_assignment() const override {
-    CHECK(false) << "PJRT C API does not support device_assignment";
+    CHECK(device_assignment_ != nullptr)
+        << "device_assignment_ is a nullptr. This is likely because "
+           "PjRtCApiLoadedExecutable::device_assignment() was called on a "
+           "portable executable, which does not have a device assignment.";
+    return *device_assignment_;
   }
 
   absl::Span<const LogicalDeviceIds> addressable_device_logical_ids()
@@ -714,16 +718,26 @@ class PjRtCApiLoadedExecutable : public PjRtLoadedExecutable {
     std::vector<RecvCallbackFunction> recv_callback_functions;
   };
 
-  // Gets common Execute_Args between Execute, ExecuteSharded and
-  // ExecutePortable. device_complete_events in the return is set if the input
+  // Returns the number of outputs of the executable.
+  absl::StatusOr<size_t> GetNumOutputs() const;
+
+  // Allocates memory for the `Execute` output.
+  // These functions are a little verbose, but allocating the correct amount of
+  // memory on initialization (thus avoiding `resize` calls) provides a
+  // significant performance optimization.
+  absl::StatusOr<std::vector<std::vector<PJRT_Buffer*>>>
+  InitializeOutputListsStorage(size_t outer_size) const;
+  absl::StatusOr<std::vector<PJRT_Buffer**>> InitializeOutputLists(
+      std::vector<std::vector<PJRT_Buffer*>>& c_output_lists_storage) const;
+
+  // Gets common Execute_Args for use in various Execute* functions.
+  // device_complete_events in the return is set if the input
   // device_complete_events has value.
   absl::StatusOr<PJRT_LoadedExecutable_Execute_Args> GetCommonExecuteArgs(
       absl::Span<const std::vector<PjRtBuffer*>> argument_handles,
       const ExecuteOptions& options, PJRT_ExecuteOptions& c_options,
       std::vector<std::vector<PJRT_Buffer*>>& c_argument_lists_storage,
       std::vector<PJRT_Buffer**>& c_arguments,
-      std::vector<std::vector<PJRT_Buffer*>>& c_output_lists_storage,
-      std::vector<PJRT_Buffer**>& c_output_lists,
       std::optional<std::vector<PJRT_Event*>>& device_complete_events,
       SendRecvCallbackData& send_recv_callback_data,
       std::vector<int64_t>& non_donatable_input_indices_storage,
@@ -741,8 +755,10 @@ class PjRtCApiLoadedExecutable : public PjRtLoadedExecutable {
       loaded_executable_;
   std::unique_ptr<PjRtCApiExecutable> executable_;
   std::vector<PjRtDevice*> addressable_devices_;
+  std::unique_ptr<const DeviceAssignment> device_assignment_;
 
   void InitDevices();
+  void InitDeviceAssignment();
 };
 
 class CApiCopyToDeviceStream : public CopyToDeviceStream {
