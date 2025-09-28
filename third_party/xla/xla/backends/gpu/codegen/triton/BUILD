@@ -263,7 +263,6 @@ cc_library(
         "//xla/service/gpu:ir_emission_utils",
         "//xla/service/gpu:launch_dimensions",
         "//xla/service/gpu/llvm_gpu_backend:amdgpu_backend",
-        "//xla/service/gpu/llvm_gpu_backend:nvptx_backend",
         "//xla/service/gpu/llvm_gpu_backend:nvptx_libdevice_path",
         "//xla/service/gpu:matmul_utils",
         "//xla/service/gpu:triton_fusion_analysis",
@@ -596,6 +595,7 @@ xla_test(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest",
+        "@llvm-project//mlir:IR",
         "@local_tsl//tsl/platform:path",
     ],
 )

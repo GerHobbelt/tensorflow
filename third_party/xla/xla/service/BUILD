@@ -4176,7 +4176,6 @@ cc_library(
         "//xla/service/llvm_ir:loop_emitter",
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/algorithm:container",
-        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
@@ -5290,6 +5289,7 @@ xla_cc_test(
         ":hlo_module_config",
         ":source_target_pairs",
         "//xla:array2d",
+        "//xla:literal",
         "//xla:literal_util",
         "//xla:shape_util",
         "//xla:xla_data_proto_cc",
@@ -5818,34 +5818,34 @@ xla_aot_compile_cpu(
 xla_aot_compile_gpu(
     name = "xla_aot_compile_test_gpu_executable",
     autotune_results = "xla_aot_compile_test_autotune_results.txtpb",
-    gpu_target_config = "xla_aot_compile_test_gpu_target_config.txtpb",
+    gpu_target_config = "//xla/tools/hlo_opt:gpu_specs/h100_sxm.txtpb",
     module = "xla_aot_compile_test.mlir",
 )
 
 xla_aot_compile_gpu(
     name = "xla_aot_compile_test_gpu_executable_hlo",
     autotune_results = "xla_aot_compile_test_autotune_results.txtpb",
-    gpu_target_config = "xla_aot_compile_test_gpu_target_config.txtpb",
+    gpu_target_config = "//xla/tools/hlo_opt:gpu_specs/h100_sxm.txtpb",
     module = "xla_aot_compile_test.hlo",
 )
 
 xla_aot_compile_gpu(
     name = "xla_aot_compile_test_gpu_executable_constant",
     autotune_results = "xla_aot_compile_test_autotune_results.txtpb",
-    gpu_target_config = "xla_aot_compile_test_gpu_target_config.txtpb",
+    gpu_target_config = "//xla/tools/hlo_opt:gpu_specs/h100_sxm.txtpb",
     module = "xla_aot_compile_test_constant.mlir",
 )
 
 xla_aot_compile_gpu(
     name = "xla_aot_compile_test_gpu_executable_convolution",
     autotune_results = "xla_aot_compile_test_autotune_results.txtpb",
-    gpu_target_config = "xla_aot_compile_test_gpu_target_config.txtpb",
+    gpu_target_config = "//xla/tools/hlo_opt:gpu_specs/h100_sxm.txtpb",
     module = "xla_aot_compile_test_convolution.mlir",
 )
 
 xla_aot_compile_gpu_runtime_autotuning(
     name = "xla_aot_compile_test_gpu_executable_convolution_runtime_autotuning",
-    gpu_target_config = "xla_aot_compile_test_gpu_target_config.txtpb",
+    gpu_target_config = "//xla/tools/hlo_opt:gpu_specs/h100_sxm.txtpb",
     module = "xla_aot_compile_test_convolution.mlir",
 )
 
@@ -5919,8 +5919,7 @@ xla_cc_test(
         "cuda-only",
         "gpu",
         "no_oss",
-        "nomsan",  # Pulls in precompiled NVIDIA libraries which cause false positives in msan.
-        "requires-gpu-sm60-only",
+        "requires-gpu-sm90-only",
     ],
     deps = [
         ":gpu_plugin_impl",
