@@ -121,8 +121,18 @@ class GpuCompiler : public LLVMCompiler {
     return false;
   }
 
+  enum class AlgebraicSimplifierMode {
+    kLayoutInsensitive,
+    kPostFusionSimplification,
+    kLayoutNormalization,
+    kPostLayoutAssignment,
+    kAfterSimplifyFPConversions,
+    kGpuConvoluationCanonicalization,
+  };
+
   static AlgebraicSimplifierOptions GetAlgebraicSimplifierOptions(
-      const HloModuleConfig& config);
+      AlgebraicSimplifierMode mode, const DebugOptions& debug_options,
+      bool is_rocm);
 
  protected:
   struct BackendCompileResult {
@@ -164,7 +174,8 @@ class GpuCompiler : public LLVMCompiler {
       HloPassPipeline* pipeline, HloModule* hlo_module,
       AutotuneConfig& autotune_config, tsl::thread::ThreadPool* thread_pool,
       const MultiProcessKeyValueStore& key_value_store,
-      const se::SemanticVersion& toolkit_version) {
+      const se::SemanticVersion& toolkit_version,
+      stream_executor::StreamExecutor* stream_executor) {
     return absl::OkStatus();
   }
 
