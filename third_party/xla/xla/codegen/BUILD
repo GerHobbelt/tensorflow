@@ -86,6 +86,7 @@ cc_library(
     hdrs = ["kernel_spec.h"],
     deps = [
         "//xla/runtime:work_cluster",
+        "//xla/runtime:work_dimensions",
         "//xla/runtime:work_group",
         "//xla/runtime:work_item",
         "//xla/service:buffer_assignment",
@@ -220,5 +221,6 @@ cc_library(
     deps = [
         "//xla/hlo/utils:hlo_traversal",
         "@com_google_absl//absl/container:inlined_vector",
+        "@com_google_absl//absl/types:span",
     ],
 )
