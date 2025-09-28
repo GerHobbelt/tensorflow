@@ -522,6 +522,7 @@ cc_library(
         "//xla/hlo/ir:hlo",
         "//xla/hlo/pass:hlo_pass",
         "//xla/hlo/utils:hlo_traversal",
+        "//xla/service:call_graph",
         "//xla/service/gpu:gpu_fusible",
         "//xla/service/gpu:ir_emission_utils",
         "//xla/service/gpu:reduction_utils",
@@ -3291,6 +3292,7 @@ cc_library(
     hdrs = ["command_buffer_conversion_pass.h"],
     deps = [
         ":thunk_pass_pipeline",
+        "//xla:util",
         "//xla/backends/gpu/runtime:command_buffer_cmd",
         "//xla/backends/gpu/runtime:command_buffer_cmd_emitter",
         "//xla/backends/gpu/runtime:command_buffer_thunk",
@@ -3333,6 +3335,7 @@ xla_test(
         "//xla/backends/gpu/runtime:cudnn_thunk",
         "//xla/backends/gpu/runtime:custom_call_thunk",
         "//xla/backends/gpu/runtime:gemm_thunk",
+        "//xla/backends/gpu/runtime:replica_id_thunk",
         "//xla/backends/gpu/runtime:sequential_thunk",
         "//xla/backends/gpu/runtime:thunk",
         "//xla/backends/gpu/runtime:while_thunk",

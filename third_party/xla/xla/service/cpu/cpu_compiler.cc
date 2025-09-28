@@ -1457,6 +1457,8 @@ CpuCompiler::CompileCpuExecutable(std::unique_ptr<HloModule> module) {
       debug_options.xla_llvm_disable_expensive_passes(),
       /*slp_vectorizer_disabled=*/options::SlpVectorizerDisabled(config),
       /*disable_loop_unrolling=*/options::DisableLoopUnrolling(config),
+      /*disable_platform_dependent_math=*/
+      options::DisablePlatformDependentMath(config),
   };
 
   // Compiler hooks to intercept compiled LLVM IR modules.
@@ -2149,6 +2151,8 @@ CpuCompiler::CompileAheadOfTimeLegacy(
       options::SlpVectorizerDisabled(module->config()),
       /*disable_loop_unrolling=*/
       options::DisableLoopUnrolling(module->config()),
+      /*disable_platform_dependent_math=*/
+      options::DisablePlatformDependentMath(module->config()),
       /*dfsan_enabled=*/aot_options.sanitize_dataflow(),
       /*dfsan_abilists_enabled=*/aot_options.sanitize_abilists_dataflow()};
 
@@ -2333,6 +2337,8 @@ CpuCompiler::CompileAheadOfTimeThunks(
       options::SlpVectorizerDisabled(module->config()),
       /*disable_loop_unrolling=*/
       options::DisableLoopUnrolling(module->config()),
+      /*disable_platform_dependent_math=*/
+      options::DisablePlatformDependentMath(module->config()),
       /*dfsan_enabled=*/aot_options.sanitize_dataflow(),
       /*dfsan_abilists_enabled=*/aot_options.sanitize_abilists_dataflow()};
 
