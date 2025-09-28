@@ -600,10 +600,10 @@ absl::Status CpuCompiler::RunHloPassesThroughLayoutAssn(
   };
   HloPredicate upcaster_filter = [&](const HloInstruction* instr) {
     if (!call_library_for_dot(*instr)) return true;
-    return !IsXnnDotSupported(instr->dot_dimension_numbers(),
-                              instr->operand(0)->shape(),
-                              instr->operand(1)->shape(), instr->shape(),
-                              target_machine_features)
+    return !IsDotSupportedByXnn(instr->dot_dimension_numbers(),
+                                instr->operand(0)->shape(),
+                                instr->operand(1)->shape(), instr->shape(),
+                                target_machine_features)
                 .value_or(false);
   };
   pipeline.AddPass<OperandUpcaster>(upcaster_filter);
@@ -939,7 +939,7 @@ absl::Status CpuCompiler::RunHloPassesAfterLayoutAssn(
         &alias_info,
         /*use_region_based_live_range_analysis=*/-1);
   } else {
-    pipeline.AddPass<CopyInsertion>();
+    pipeline.AddPass<CopyInsertion>(&alias_info);
   }
 
   // The hoisting of small while loops is only useful in the context of the
