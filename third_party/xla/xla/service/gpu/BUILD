@@ -1376,6 +1376,7 @@ cc_library(
     hdrs = ["fusion_pipeline.h"],
     deps = [
         "//xla:xla_proto_cc",
+        "//xla/hlo/ir:hlo",
         "//xla/hlo/pass:hlo_pass",
         "//xla/hlo/pass:hlo_pass_pipeline",
         "//xla/hlo/transforms/simplifiers:hlo_dce",
@@ -1649,6 +1650,7 @@ cc_library(
         "//xla/service/gpu/transforms/collectives:async_collective_annotator",
         "//xla/service/gpu/transforms/collectives:collective_backend_assigner",
         "//xla/service/gpu/transforms/collectives:collective_combiner_annotator",
+        "//xla/service/gpu/transforms/collectives:collective_ops_utils",
         "//xla/service/gpu/transforms/collectives:collective_permute_cycle_decomposer",
         "//xla/service/gpu/transforms/collectives:collective_pipelining_analyzer",
         "//xla/service/gpu/transforms/collectives:collective_select_folder",
@@ -1791,6 +1793,7 @@ xla_test(
         "//xla:error_spec",
         "//xla:shape_util",
         "//xla:util",
+        "//xla/hlo/analysis:alias_info",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/transforms/simplifiers:hlo_memory_scheduler",
         "//xla/hlo/transforms/simplifiers:hlo_rematerialization",
