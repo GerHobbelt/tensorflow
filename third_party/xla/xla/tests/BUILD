@@ -540,6 +540,7 @@ xla_test(
     timeout = "long",
     srcs = ["conv_depthwise_backprop_filter_test.cc"],
     shard_count = 40,
+    tags = ["nozapfhahn"],  # TODO: b/445492433 - Re-enable when it doesn't time out.
     deps = [
         ":client_library_test_base",
         ":hlo_test_base",
@@ -1008,6 +1009,10 @@ xla_test(
     name = "dot_operation_test",
     timeout = "long",
     srcs = ["dot_operation_test.cc"],
+    backend_tags = {
+        # TODO(b/445172709): Re-enable once fixed.
+        "b200": ["broken"],
+    },
     shard_count = 20,
     tags = [
         "optonly",
@@ -1064,6 +1069,10 @@ xla_test(
     name = "dot_operation_test_autotune_disabled",
     srcs = ["dot_operation_test.cc"],
     args = ["--xla_gpu_autotune_level=0"],
+    backend_tags = {
+        # TODO(b/445172709): Re-enable once fixed.
+        "b200": ["broken"],
+    },
     backends = ["gpu"],
     shard_count = 20,
     tags = [
@@ -1272,6 +1281,10 @@ xla_test(
         "cpu": [
             "--xla_cpu_multi_thread_eigen=false",
         ],
+    },
+    backend_tags = {
+        # TODO(b/445172709): Re-enable once fixed.
+        "b200": ["broken"],
     },
     shard_count = 20,
     tags = [

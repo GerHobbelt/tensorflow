@@ -11735,6 +11735,10 @@ func DecodeCSVNaValue(value string) DecodeCSVAttr {
 }
 
 // DecodeCSVSelectCols sets the optional select_cols attribute to value.
+//
+// value: Optional sorted list of column indices to select. If specified,
+// only this subset of columns will be parsed and returned.
+// It only works on `records` except for `record_defaults`.
 // If not specified, defaults to {}
 func DecodeCSVSelectCols(value []int64) DecodeCSVAttr {
 	return func(m optionalAttr) {
@@ -16627,6 +16631,7 @@ func ExtractGlimpseNormalized(value bool) ExtractGlimpseAttr {
 //
 // value: indicates if the noise should be generated using a
 // uniform distribution or a Gaussian distribution.
+// It should not be `True` when `noise` is not `uniform`.
 // If not specified, defaults to true
 func ExtractGlimpseUniformNoise(value bool) ExtractGlimpseAttr {
 	return func(m optionalAttr) {
@@ -16733,6 +16738,7 @@ func ExtractGlimpseV2Normalized(value bool) ExtractGlimpseV2Attr {
 //
 // value: indicates if the noise should be generated using a
 // uniform distribution or a Gaussian distribution.
+// It should not be `True` when `noise` is not `uniform`.
 // If not specified, defaults to true
 func ExtractGlimpseV2UniformNoise(value bool) ExtractGlimpseV2Attr {
 	return func(m optionalAttr) {
