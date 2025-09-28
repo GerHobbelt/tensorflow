@@ -508,8 +508,11 @@ xla_cc_test(
         "//xla/tsl/platform:statusor",
         "//xla/tsl/platform:test",
         "//xla/tsl/util/proto:proto_matchers",
+        "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_googletest//:gtest_main",
+        "@local_tsl//tsl/platform:protobuf",
     ],
 )
 
@@ -937,6 +940,7 @@ cc_library(
         "//xla/stream_executor:device_memory",
         "//xla/stream_executor:device_memory_handle",
         "//xla/stream_executor:stream",
+        "//xla/stream_executor/gpu:all_reduce_kernel",
         "//xla/tsl/platform:errors",
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/algorithm:container",
@@ -947,6 +951,7 @@ cc_library(
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
     ],
@@ -1892,6 +1897,7 @@ cc_library(
     srcs = ["thunk_proto_deserialization.cc"],
     hdrs = ["thunk_proto_deserialization.h"],
     deps = [
+        ":conditional_thunk",
         ":copy_thunk",
         ":gemm_thunk",
         ":sequential_thunk",
@@ -1910,6 +1916,7 @@ xla_cc_test(
     name = "thunk_proto_deserialization_test",
     srcs = ["thunk_proto_deserialization_test.cc"],
     deps = [
+        ":conditional_thunk",
         ":copy_thunk",
         ":sequential_thunk",
         ":thunk",
