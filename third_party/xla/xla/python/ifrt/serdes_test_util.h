@@ -1,4 +1,4 @@
-/* Copyright 2017 The OpenXLA Authors.
+/* Copyright 2025 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,18 +13,23 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "xla/tests/test_macros.h"
+#ifndef XLA_PYTHON_IFRT_SERDES_TEST_UTIL_H_
+#define XLA_PYTHON_IFRT_SERDES_TEST_UTIL_H_
 
-#include "tsl/platform/logging.h"
+#include <vector>
+
+#include "xla/python/ifrt/serdes_version.h"
 
 namespace xla {
+namespace ifrt {
+namespace test_util {
 
-static bool InitModule() {
-  *TestPlatform() = XLA_PLATFORM;
-  VLOG(1) << "TestPlatform: " << *TestPlatform();
-  return true;
-}
+// Returns all supported SerDes versions. Expected to be used to construct the
+// test parameters for parameterized tests.
+std::vector<SerDesVersion> AllSupportedSerDesVersions();
 
-static bool module_initialized = InitModule();
-
+}  // namespace test_util
+}  // namespace ifrt
 }  // namespace xla
+
+#endif  // XLA_PYTHON_IFRT_SERDES_TEST_UTIL_H_

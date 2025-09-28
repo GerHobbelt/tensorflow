@@ -1,4 +1,4 @@
-/* Copyright 2025 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2025 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,18 +13,22 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef TENSORFLOW_COMPILER_MLIR_STABLEHLO_TRANSFORMS_MHLO_PASSES_TF_FUSE_CONVOLUTION_PASS_H_
-#define TENSORFLOW_COMPILER_MLIR_STABLEHLO_TRANSFORMS_MHLO_PASSES_TF_FUSE_CONVOLUTION_PASS_H_
+#include "xla/tsl/platform/recordphase.h"
 
-#include <memory>
+#include <string>
+#include <vector>
 
-#include "mlir/Pass/Pass.h"  // from @llvm-project
+#include "absl/strings/string_view.h"
 
-namespace mlir::odml::tf_quant {
+namespace tsl::recordphase {
+void StartPhase(const absl::string_view phase_name,
+                const std::vector<absl::string_view>& dependencies) {}
 
-// Fuses MHLO binary element-wise ops and convolution op.
-std::unique_ptr<Pass> createFuseConvolutionPass();
+std::string StartPhaseUnique(
+    absl::string_view phase_name,
+    const std::vector<absl::string_view>& dependencies) {
+  return std::string(phase_name);
+}
 
-}  // namespace mlir::odml::tf_quant
-
-#endif  // TENSORFLOW_COMPILER_MLIR_STABLEHLO_TRANSFORMS_MHLO_PASSES_TF_FUSE_CONVOLUTION_PASS_H_
+void EndPhase(const absl::string_view phase_name) {}
+}  // namespace tsl::recordphase
