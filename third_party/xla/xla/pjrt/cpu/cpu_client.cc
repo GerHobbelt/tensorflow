@@ -854,7 +854,7 @@ absl::StatusOr<std::unique_ptr<PjRtBuffer>> PjRtCpuClient::CreateErrorBuffer(
           absl::InlinedVector<tsl::AsyncValueRef<CpuEvent>, 4>{
               tsl::AsyncValueRef<CpuEvent>(
                   tsl::MakeErrorAsyncValueRef(std::move(error)))}),
-      *device->default_memory_space());
+      memory_space);
 }
 
 absl::StatusOr<std::unique_ptr<PjRtClient::AsyncHostToDeviceTransferManager>>
@@ -1324,7 +1324,8 @@ absl::StatusOr<PjRtLoadedExecutable::Result> PjRtCpuExecutable::ExecuteHelper(
     TrackedCpuDeviceBuffer* tracked_buffer;
     auto get_buffer = [&](int i) -> absl::Status {
       bool must_donate = donate_it != parameters_that_must_be_donated_.end() &&
-                         *donate_it == i;
+                         *donate_it == i &&
+                         !options.non_donatable_input_indices.contains(i);
       TF_RETURN_IF_ERROR(TestBufferDonationClashes(
           cpu_buffer, donation_clashes, must_donate, i, replica, partition));
       if (must_donate) {
