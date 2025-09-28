@@ -37,7 +37,8 @@ class TritonBackend : public GpuCodegenBackend {
       : GpuCodegenBackend("Triton", target_config, debug_options, compiler) {}
 
   std::vector<std::unique_ptr<BackendConfig>> GetSupportedConfigs(
-      const HloInstruction& instr) override;
+      const HloInstruction& instr,
+      stream_executor::StreamExecutor* stream_executor) override;
   absl::StatusOr<std::unique_ptr<BackendConfig>> GetDefaultConfig(
       const HloInstruction& instr) override;
 
