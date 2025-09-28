@@ -402,9 +402,15 @@ class PjRtCApiClient : public PjRtClient {
   using CrossHostRecvNotifierFunction =
       std::function<void(PJRT_Error*, const char**, size_t*, size_t)>;
 
+  template <typename ExtType>
+  ExtType* FindExtension(PJRT_Extension_Type type) const {
+    return reinterpret_cast<ExtType*>(FindExtensionImpl(type));  // NOLINT
+  }
+
  private:
   void InitDevicesAndMemorySpaces();
   void InitAttributes();
+  PJRT_Extension_Base* FindExtensionImpl(PJRT_Extension_Type type) const;
 
   absl::StatusOr<std::unique_ptr<PjRtBuffer>> BufferFromHostBufferInternalImpl(
       const void* data, PrimitiveType type, absl::Span<int64_t const> dims,
@@ -428,6 +434,7 @@ class PjRtCApiClient : public PjRtClient {
   // (e.g. unimplemented). Save the error during client init so we can return it
   // from GetTopologyDescription().
   absl::StatusOr<const PjRtCApiTopologyDescription> topo_desc_;
+  absl::flat_hash_map<PJRT_Extension_Type, PJRT_Extension_Base*> extensions_;
 
   const std::string platform_version_;
   const std::string platform_name_;
@@ -617,11 +624,7 @@ class PjRtCApiLoadedExecutable : public PjRtLoadedExecutable {
   }
 
   const DeviceAssignment& device_assignment() const override {
-    CHECK(device_assignment_ != nullptr)
-        << "device_assignment_ is a nullptr. This is likely because "
-           "PjRtCApiLoadedExecutable::device_assignment() was called on a "
-           "portable executable, which does not have a device assignment.";
-    return *device_assignment_;
+    CHECK(false) << "PJRT C API does not support device_assignment";
   }
 
   absl::Span<const LogicalDeviceIds> addressable_device_logical_ids()
@@ -755,10 +758,8 @@ class PjRtCApiLoadedExecutable : public PjRtLoadedExecutable {
       loaded_executable_;
   std::unique_ptr<PjRtCApiExecutable> executable_;
   std::vector<PjRtDevice*> addressable_devices_;
-  std::unique_ptr<const DeviceAssignment> device_assignment_;
 
   void InitDevices();
-  void InitDeviceAssignment();
 };
 
 class CApiCopyToDeviceStream : public CopyToDeviceStream {
