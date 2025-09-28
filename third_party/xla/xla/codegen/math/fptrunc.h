@@ -30,13 +30,10 @@ namespace xla::codegen {
 // XLA intrinsic for truncating floating point values (scalars and vectors).
 class Intrinsic::FpTrunc {
  public:
-  static std::string Name(PrimitiveType from, PrimitiveType to);
-  static std::string Name(PrimitiveType from, PrimitiveType to,
-                          int64_t vector_width);
+  static std::string Name(Type from, Type to);
 
-  static llvm::Function* GetOrInsertDeclaration(llvm::Module* module,
-                                                PrimitiveType from,
-                                                PrimitiveType to);
+  static llvm::Function* GetOrInsertDeclaration(llvm::Module* module, Type from,
+                                                Type to);
 
   static absl::StatusOr<llvm::Function*> CreateDefinition(llvm::Module* module,
                                                           PrimitiveType from,

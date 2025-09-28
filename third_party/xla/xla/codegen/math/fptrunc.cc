@@ -31,26 +31,18 @@ limitations under the License.
 #include "llvm/IR/Type.h"
 #include "llvm/Support/Casting.h"
 #include "xla/codegen/math/intrinsic.h"
-#include "xla/service/llvm_ir/llvm_util.h"
 #include "xla/util.h"
 
 namespace xla::codegen {
 
-std::string Intrinsic::FpTrunc::Name(PrimitiveType from, PrimitiveType to) {
-  return absl::StrCat("xla.fptrunc.", ScalarName(from), ".to.", ScalarName(to));
-}
-
-std::string Intrinsic::FpTrunc::Name(PrimitiveType from, PrimitiveType to,
-                                     int64_t vector_width) {
-  return absl::StrCat("xla.fptrunc.", VectorName(from, vector_width), ".to.",
-                      VectorName(to, vector_width));
+std::string Intrinsic::FpTrunc::Name(Type from, Type to) {
+  return absl::StrCat("xla.fptrunc.", from.name(), ".to.", to.name());
 }
 
 llvm::Function* Intrinsic::FpTrunc::GetOrInsertDeclaration(llvm::Module* module,
-                                                           PrimitiveType from,
-                                                           PrimitiveType to) {
-  auto* from_type = llvm_ir::PrimitiveTypeToIrType(from, module->getContext());
-  auto* to_type = llvm_ir::PrimitiveTypeToIrType(to, module->getContext());
+                                                           Type from, Type to) {
+  auto* from_type = TypeToIrType(from, module->getContext());
+  auto* to_type = TypeToIrType(to, module->getContext());
   auto* function_type = llvm::FunctionType::get(to_type, {from_type}, false);
   return llvm::cast<llvm::Function>(
       module->getOrInsertFunction(Name(from, to), function_type).getCallee());
@@ -77,10 +69,15 @@ static llvm::Function* TruncateF32ToBf16(llvm::Module* module,
 
   llvm::FunctionType* function_type =
       llvm::FunctionType::get(bf16_type, {f32_type}, false);
+
+  Intrinsic::Type from =
+      vector_width > 1 ? Intrinsic::V(F32, vector_width) : Intrinsic::S(F32);
+  Intrinsic::Type to =
+      vector_width > 1 ? Intrinsic::V(BF16, vector_width) : Intrinsic::S(BF16);
   llvm::Function* func = llvm::dyn_cast<llvm::Function>(
       module
-          ->getOrInsertFunction(
-              Intrinsic::FpTrunc::Name(F32, BF16, vector_width), function_type)
+          ->getOrInsertFunction(Intrinsic::FpTrunc::Name(from, to),
+                                function_type)
           .getCallee());
 
   llvm::Argument* arg = func->getArg(0);

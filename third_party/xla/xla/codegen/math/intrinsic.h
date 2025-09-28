@@ -18,8 +18,11 @@ limitations under the License.
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <variant>
 
+#include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "llvm/IR/Function.h"
@@ -61,12 +64,49 @@ class Intrinsic {
   // that get forwarded to the concrete implementation.
   //
   // go/keep-sorted start
+  class Erf;
   class Exp;
   class FpTrunc;
   class Ldexp;
   class Log1p;
   class Rsqrt;
   // go/keep-sorted end
+
+  // A scalar argument or result.
+  struct Scalar {
+    PrimitiveType type;
+  };
+
+  // A vector argument or result.
+  struct Vec {
+    PrimitiveType type;
+    size_t width;
+  };
+
+  // Intrinsics overloaded on the arguments and result types.
+  struct Type : public std::variant<Scalar, Vec> {
+    using std::variant<Scalar, Vec>::variant;
+
+    std::string name() const;
+    bool is_scalar() const;
+    bool is_vector() const;
+    PrimitiveType element_type() const;
+    std::optional<size_t> vector_width() const;
+  };
+
+  // Shortened builders for the scalar and vector types defined above.
+  static Type S(PrimitiveType type) { return Scalar{type}; }
+  static Type V(PrimitiveType type, size_t width) { return Vec{type, width}; }
+
+  // Verifies that the two types have the same width.
+  static absl::Status VerifySameWidth(const Type& a, const Type& b);
+
+  // Verifies that the two types have the same width and element type.
+  static absl::Status VerifySameWidthAndElementType(const Type& a,
+                                                    const Type& b);
+
+  // Returns the LLVM IR type for the given intrinsic type.
+  static llvm::Type* TypeToIrType(Type type, llvm::LLVMContext& context);
 
   // Returns the name of the scalar intrinsic for the given data type.
   template <typename Intrinsic>

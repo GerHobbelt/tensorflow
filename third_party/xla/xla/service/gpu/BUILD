@@ -803,7 +803,6 @@ cc_library(
     srcs = ["dynamic_slicing_utils.cc"],
     hdrs = ["dynamic_slicing_utils.h"],
     # copybara:uncomment compatible_with = ["//buildenv/target:non_prod"],
-    tags = ["gpu"],
     deps = [
         ":gpu_constants",
         ":ir_emission_utils",
@@ -1388,7 +1387,6 @@ cc_library(
         "//xla/service:hlo_verifier",
         "//xla/service:layout_assignment",
         "//xla/service/gpu/model:gpu_hlo_cost_analysis",
-        "//xla/service/gpu/transforms:horizontal_input_fusion",
         "//xla/service/gpu/transforms:horizontal_loop_fusion",
         "//xla/service/gpu/transforms:multi_output_fusion",
         "//xla/service/gpu/transforms:priority_fusion",
@@ -1718,6 +1716,7 @@ cc_library(
     ] + xla_internal(["service:export_hlo"]) + if_google([
         "//xla/hlo/experimental/auto_sharding",
         "//xla/hlo/experimental/auto_sharding:auto_sharding_option",
+        "//xla/hlo/experimental/auto_sharding:auto_sharding_stablehlo_pass",
     ]),
 )
 
@@ -2119,6 +2118,7 @@ cc_library(
         "rocm-only",
     ],
     deps = [
+        ":alias_info",
         ":cublas_padding_requirements",
         ":gpu_compiler",
         ":target_constants",
