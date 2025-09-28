@@ -1,4 +1,4 @@
-/* Copyright 2024 The OpenXLA Authors.
+/* Copyright 2022 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,9 +13,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-namespace xla::gpu::repeat_buffer_kernel {
+#include <gtest/gtest.h>
+#include "absl/strings/string_view.h"
+#include "xla/python/ifrt/test_util.h"
 
-// Stub to make CPU build linker find undefined symbol.
-void* kernel() { return nullptr; }
+int main(int argc, char** argv) {
+  // CpuBuffer::ToLiteral() currently does not respect the layout of the
+  // destination literal.
+  static constexpr absl::string_view kFilter =
+      "-ArrayImplTest."
+      "MakeArrayFromHostBufferAndCopyToHostBufferWithByteStrides";
+  xla::ifrt::test_util::SetTestFilterIfNotUserSpecified(kFilter);
 
-}  // namespace xla::gpu::repeat_buffer_kernel
+  testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
+}
