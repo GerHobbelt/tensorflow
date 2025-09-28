@@ -79,9 +79,8 @@ xla_test(
     local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]),
     tags = [
         "no-oneapi",  # TODO(intel-tf): Enable this test for SYCL when IntelGpuCompiler is implemented.
-        "notsan",
         "test_migrated_to_hlo_runner_pjrt",
-    ],  # TODO(b/345034145): Fix tsan error.
+    ],
     deps = if_gpu_is_configured(
         #keep sorted
         [
@@ -553,10 +552,12 @@ xla_test(
     name = "ragged_dot_test",
     srcs = ["ragged_dot_test.cc"],
     backends = ["gpu"],
+    tags = ["test_migrated_to_hlo_runner_pjrt"],
     deps = [
-        ":gpu_codegen_test",
         "//xla:error_spec",
         "//xla:literal_util",
+        "//xla/tests:hlo_pjrt_interpreter_reference_mixin",
+        "//xla/tests:hlo_pjrt_test_base",
         "//xla/tests:test_utils",
         "//xla/tsl/platform:statusor",
         "@com_google_googletest//:gtest_main",
