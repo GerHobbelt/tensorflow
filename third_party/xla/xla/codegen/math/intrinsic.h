@@ -16,13 +16,16 @@ limitations under the License.
 #ifndef XLA_CODEGEN_MATH_INTRINSIC_H_
 #define XLA_CODEGEN_MATH_INTRINSIC_H_
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/Module.h"
 #include "xla/primitive_util.h"
+#include "xla/service/llvm_ir/llvm_util.h"
 #include "xla/xla_data.pb.h"
 
 namespace xla::codegen {
@@ -60,6 +63,9 @@ class Intrinsic {
   // go/keep-sorted start
   class Exp;
   class FpTrunc;
+  class Ldexp;
+  class Log1p;
+  class Rsqrt;
   // go/keep-sorted end
 
   // Returns the name of the scalar intrinsic for the given data type.
@@ -103,15 +109,23 @@ class Intrinsic {
     return Intrinsic::GetOrInsertDeclaration(module, t0, t1);
   }
 
-  // Creates the definition of the vector intrinsic for the given data types.s
+  // Creates the definition of the vector intrinsic for the given data types.
   template <typename Intrinsic>
-  static absl::StatusOr<llvm::Function*> CreateDefinition(
-      llvm::Module* module, PrimitiveType from, PrimitiveType to,
-      int64_t vector_width) {
+  static absl::StatusOr<llvm::Function*> CreateDefinition(llvm::Module* module,
+                                                          PrimitiveType from,
+                                                          PrimitiveType to,
+                                                          size_t vector_width) {
     return Intrinsic::CreateDefinition(module, from, to, vector_width);
   }
 
- private:
+  // Creates the definition of the vector intrinsic for the given data types.
+  template <typename Intrinsic>
+  static absl::StatusOr<llvm::Function*> CreateDefinition(llvm::Module* module,
+                                                          PrimitiveType type,
+                                                          size_t vector_width) {
+    return Intrinsic::CreateDefinition(module, type, vector_width);
+  }
+
   static std::string ScalarName(PrimitiveType type) {
     return primitive_util::LowercasePrimitiveTypeName(type);
   }
@@ -120,6 +134,37 @@ class Intrinsic {
     return absl::StrCat("v", vector_width, ScalarName(type));
   }
 };
+
+namespace intrinsics {
+template <typename Derived>
+class UnaryIntrinsic {
+ public:
+  static std::string Name(PrimitiveType type) {
+    return absl::StrCat("xla.", Derived::kName, ".",
+                        Intrinsic::ScalarName(type));
+  }
+
+  static std::string Name(PrimitiveType type, int64_t vector_width) {
+    return absl::StrCat("xla.", Derived::kName, ".",
+                        Intrinsic::VectorName(type, vector_width));
+  }
+
+  static llvm::Function* GetOrInsertDeclaration(llvm::Module* module,
+                                                PrimitiveType prim_type) {
+    auto* type =
+        llvm_ir::PrimitiveTypeToIrType(prim_type, module->getContext());
+    auto* function_type = llvm::FunctionType::get(type, {type}, false);
+    return llvm::cast<llvm::Function>(
+        module->getOrInsertFunction(Name(prim_type), function_type)
+            .getCallee());
+  }
+
+  static absl::StatusOr<llvm::Function*> CreateDefinition(
+      llvm::Module* module, PrimitiveType prim_type, size_t vector_width) {
+    return Derived::CreateDefinition(module, prim_type, vector_width);
+  }
+};
+}  // namespace intrinsics
 
 }  // namespace xla::codegen
 
