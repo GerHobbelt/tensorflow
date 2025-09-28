@@ -724,6 +724,8 @@ absl::Status RunOptimizationPasses(
     const AlgebraicSimplifierOptions& layout_insensitive_algsimp_opts,
     absl::string_view platform_name) {
   const DebugOptions& debug_options = hlo_module->config().debug_options();
+  se::GpuComputeCapability gpu_version =
+      gpu_target_config.device_description.gpu_compute_capability();
 
   HloPassPipeline pipeline("optimization");
   AddHloVerifier(&pipeline, !debug_options.xla_ignore_channel_id());
@@ -738,7 +740,7 @@ absl::Status RunOptimizationPasses(
     pipeline.AddPass<WindowedEinsumHandler>();
   }
   pipeline.AddPass<TopKSplitter>();
-  pipeline.AddPass<TopkSpecializer>();
+  pipeline.AddPass<TopkSpecializer>(gpu_version);
   pipeline.AddPass<TopkDecomposer>();
 
   pipeline.AddPass<DotDimensionSorter>();
@@ -876,9 +878,6 @@ absl::Status RunOptimizationPasses(
   // Expand the sort op to support stable sorting if required.
   pipeline.AddPass<StableSortExpander>();
 
-  se::GpuComputeCapability gpu_version =
-      gpu_target_config.device_description.gpu_compute_capability();
-
   // Build simplification pipeline.  The passes in here are run to a fixed
   // point.
   [&, &pipeline =
@@ -900,7 +899,6 @@ absl::Status RunOptimizationPasses(
         gpu_target_config.device_description.gpu_compute_capability());
     pipeline.AddPass<GpuAlgebraicSimplifier>(layout_insensitive_algsimp_opts,
                                              gpu_version);
-    pipeline.AddPass<BitcastDtypesExpander>();
     // Only merge "smallish" dots.  This threshold defaults to 32MB today, with
     // a flag to override.
     // Do not merge dots when they are assigned different stream ids.
@@ -1704,6 +1702,10 @@ absl::Status GpuCompiler::OptimizeHloPostLayoutAssignment(
     // duplicate or NOPs, so remove them with algebraic simplification and CSE.
     pipeline.AddPass<HloPassFix<GpuAlgebraicSimplifier>>(simplifier_options,
                                                          gpu_version);
+
+    // Expand bitcast-converts which are not bitcasts remaining after algebraic
+    // simplification.
+    pipeline.AddPass<BitcastDtypesExpander>();
 
     // GemmRewriter assumes that all transposes are folded into gemms, but,
     // since commit 7d529df, this is not always true at this point.
