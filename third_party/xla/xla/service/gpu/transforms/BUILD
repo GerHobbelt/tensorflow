@@ -1451,7 +1451,10 @@ xla_cc_test(
     deps = [
         ":fusion_wrapper",
         "//xla/hlo/testlib:hlo_hardware_independent_test_base",
+        "//xla/stream_executor:device_description",
         "//xla/stream_executor:device_description_proto_cc",
+        "//xla/tsl/platform:statusor",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_googletest//:gtest_main",
     ],
 )
@@ -2351,6 +2354,8 @@ xla_cc_test(
         "//xla/service:pattern_matcher",
         "//xla/stream_executor:device_description",
         "//xla/tests:xla_internal_test_main",
+        "//xla/tsl/platform:statusor",
+        "@com_google_absl//absl/status:statusor",
     ],
 )
 
@@ -2424,6 +2429,25 @@ cc_library(
         "//xla/hlo/pass:hlo_pass",
         "//xla/tsl/platform:errors",
         "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:string_view",
+    ],
+)
+
+cc_library(
+    name = "scaled_dot_rewriter",
+    srcs = ["scaled_dot_rewriter.cc"],
+    hdrs = ["scaled_dot_rewriter.h"],
+    deps = [
+        "//xla:shape_util",
+        "//xla:util",
+        "//xla:xla_data_proto_cc",
+        "//xla/hlo/ir:hlo",
+        "//xla/hlo/pass:hlo_pass",
+        "//xla/tsl/platform:errors",
+        "//xla/tsl/platform:statusor",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings:string_view",
     ],
@@ -2692,10 +2716,11 @@ xla_cc_test(
         "//xla/hlo/testlib:hlo_hardware_independent_test_base",
         "//xla/service/gpu:backend_configs_cc",
         "//xla/stream_executor:device_description",
+        "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_googletest//:gtest_main",
-        "@local_tsl//tsl/platform:statusor",
     ],
 )
 
@@ -2894,9 +2919,9 @@ xla_cc_test(
         ":tree_reduction_rewriter",
         "//xla/hlo/testlib:hlo_hardware_independent_test_base",
         "//xla/stream_executor:device_description",
+        "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest_main",
-        "@local_tsl//tsl/platform:test",
     ],
 )
 
@@ -3354,6 +3379,23 @@ xla_test(
         "//xla/tsl/platform:status",
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/status:status_matchers",
+        "@com_google_absl//absl/strings",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+xla_cc_test(
+    name = "scaled_dot_rewriter_test",
+    srcs = ["scaled_dot_rewriter_test.cc"],
+    deps = [
+        ":scaled_dot_rewriter",
+        "//xla:error_spec",
+        "//xla:xla_data_proto_cc",
+        "//xla/hlo/ir:hlo",
+        "//xla/hlo/parser:hlo_parser",
+        "//xla/tests:hlo_test_base",
+        "//xla/tsl/platform:statusor",
+        "@com_google_absl//absl/log",
         "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest_main",
     ],

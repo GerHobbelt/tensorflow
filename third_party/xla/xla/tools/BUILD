@@ -9,6 +9,7 @@ load(
     "xla_cc_binary",
     "xla_cc_test",
     "xla_internal",
+    "xla_internal_plugin_deps",
     "xla_py_proto_library",
 )
 load("//xla/stream_executor:build_defs.bzl", "if_gpu_is_configured")
@@ -321,10 +322,16 @@ xla_cc_binary(
         "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:path",
         "@local_tsl//tsl/platform:platform_port",
-    ] + if_cuda_or_rocm([
-        "//xla/service:gpu_plugin",
-    ]) + if_cuda([
+    ] + if_cuda_or_rocm(
+        [
+            "//xla/service:gpu_plugin",
+        ],
+        xla_internal_plugin_deps(),
+    ) + if_cuda([
         "//xla/stream_executor:cuda_platform",
+        "@local_config_cuda//cuda:cuda_runtime",
+    ]) + if_rocm([
+        "//xla/stream_executor:rocm_platform",
     ]) + xla_internal(
         ["service:hlo_graph_dumper_google"],
         otherwise = ["//xla/service:hlo_graph_dumper"],
@@ -972,6 +979,11 @@ tsl_gpu_library(
         "//xla/stream_executor:stream_executor_h",
         "//xla/stream_executor:stream_executor_memory_allocator",
         "//xla/tsl/platform:env",
+        "//xla/tsl/platform:env_time",
+        "//xla/tsl/platform:errors",
+        "//xla/tsl/platform:status",
+        "//xla/tsl/platform:status_to_from_proto",
+        "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/cleanup",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
