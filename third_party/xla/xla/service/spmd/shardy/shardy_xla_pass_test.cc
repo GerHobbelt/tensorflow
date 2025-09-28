@@ -158,7 +158,8 @@ TEST_F(ShardyXLATest, NonFlatGraph) {
   TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<VerifiedHloModule> module,
                           ParseAndReturnVerifiedModule(hloString));
   runShardyWithStablehloImport(module.get());
-  EXPECT_EQ(module->computation_count(), 1);
+  // Computations refer to: %foo, %bar (x2), %entry.
+  EXPECT_EQ(module->computation_count(), 4);
 }
 
 TEST_F(ShardyXLATest, NonFlatWhileComputation) {
@@ -208,8 +209,8 @@ TEST_F(ShardyXLATest, NonFlatWhileComputation) {
   TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<VerifiedHloModule> module,
                           ParseAndReturnVerifiedModule(hloString));
   runShardyWithStablehloImport(module.get());
-  // Computations refer to: %cond1, %cond2, %loop1, %loop2, %entry.
-  EXPECT_EQ(module->computation_count(), 5);
+  // Computations refer to: %foo (x3), %cond1, %cond2, %loop1, %loop2, %entry.
+  EXPECT_EQ(module->computation_count(), 8);
 }
 
 TEST_F(ShardyXLATest, SharedWhileComputation) {
@@ -244,8 +245,8 @@ TEST_F(ShardyXLATest, SharedWhileComputation) {
   TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<VerifiedHloModule> module,
                           ParseAndReturnVerifiedModule(hloString));
   runShardyWithStablehloImport(module.get());
-  // Computations refer to: %cond (x2), %loop (x2), %entry.
-  EXPECT_EQ(module->computation_count(), 5);
+  // Computations refer to: %foo (x2), %cond (x2), %loop (x2), %entry.
+  EXPECT_EQ(module->computation_count(), 7);
 }
 
 TEST_F(ShardyXLATest, CostantSplitter) {
@@ -1072,6 +1073,29 @@ TEST_F(ShardyXLATest, PreserveOriginalValueRecoveryTable) {
   runShardyWithSdyImport(module.get());
   EXPECT_TRUE(*RunFileCheck(module->original_value_recovery_table().ToString(),
                             expected));
+}
+
+TEST_F(ShardyXLATest, UpdateInlineableAttr) {
+  const char* const hloString = R"(
+    HloModule module
+
+    xla.sdy.manual_computation_body {
+      constant.0 = f32[1] constant({0})
+      ROOT tuple.1 = () tuple()
+    }
+
+    ENTRY entry {
+      ROOT call.2 = () call(), to_apply=xla.sdy.manual_computation_body, frontend_attributes={inlineable="false"}
+    })";
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<VerifiedHloModule> module,
+                          ParseAndReturnVerifiedModule(hloString));
+  runShardy(module.get(), /*stablehloImport=*/false,
+            /*runSdyShardingPropagation=*/false);
+
+  HloInstruction* root = module->entry_computation()->root_instruction();
+  EXPECT_EQ(root->opcode(), HloOpcode::kCall);
+  EXPECT_FALSE(root->has_frontend_attributes());
+  EXPECT_EQ(root->to_apply()->name(), "inlineable_callee");
 }
 
 }  // namespace sdy
