@@ -3548,7 +3548,6 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/types:span",
-        "@local_tsl//tsl/platform:logging",
     ],
 )
 
@@ -4196,8 +4195,6 @@ xla_test(
         "cpu",
         "gpu",
     ],
-    # TODO(b/332870133): Enable when it passes on H100.
-    disabled_backends = ["h100"],
     tags = [
         "no_windows",  # TODO(b/152037541)
     ],
