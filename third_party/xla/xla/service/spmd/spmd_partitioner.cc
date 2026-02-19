@@ -93,10 +93,9 @@ std::string SpmdLogger::MakeReport() {
   absl::StrAppend(&report,
                   "\n\n***** SPMD memory during transformation *****\n");
 
-  std::sort(entries_.begin(), entries_.end(),
-            [](auto const& entry0, auto const& entry1) {
-              return entry0.first > entry1.first;
-            });
+  absl::c_sort(entries_, [](auto const& entry0, auto const& entry1) {
+    return entry0.first > entry1.first;
+  });
   for (int64_t i = 0;
        i < std::min<int64_t>(report_instruction_count_, entries_.size()); ++i) {
     absl::StrAppend(&report, "\n  ",
@@ -176,22 +175,22 @@ template <typename F>
     }
   }
 
-  const auto add_report = [&](std::vector<HloInstruction*>* insts) {
-    std::sort(insts->begin(), insts->end(),
-              [](const HloInstruction* inst0, const HloInstruction* inst1) {
-                return ShapeSizeInBytes(inst0->shape()) >
-                       ShapeSizeInBytes(inst1->shape());
-              });
+  const auto add_report = [&](std::vector<HloInstruction*>& insts) {
+    absl::c_sort(insts,
+                 [](const HloInstruction* inst0, const HloInstruction* inst1) {
+                   return ShapeSizeInBytes(inst0->shape()) >
+                          ShapeSizeInBytes(inst1->shape());
+                 });
     for (int64_t i = 0;
-         i < std::min<int64_t>(report_instruction_count, insts->size()); ++i) {
+         i < std::min<int64_t>(report_instruction_count, insts.size()); ++i) {
       absl::StrAppend(&report, "  ",
                       tsl::strings::HumanReadableNumBytes(
-                          ShapeSizeInBytes((*insts)[i]->shape())),
-                      " : ", (*insts)[i]->ToString(), "\n");
+                          ShapeSizeInBytes(insts[i]->shape())),
+                      " : ", insts[i]->ToString(), "\n");
     }
   };
 
-  add_report(&instructions);
+  add_report(instructions);
   return report;
 }
 
@@ -677,7 +676,7 @@ PartitionedHlo PartitionedHlo::ReshardNoCache(
   if (target.ReplicateOnLastTileDim()) {
     std::vector<int64_t> group_dims(target.tile_assignment().num_dimensions() -
                                     1);
-    std::iota(group_dims.begin(), group_dims.end(), 0);
+    absl::c_iota(group_dims, 0);
     auto target_grouped =
         hlo_sharding_util::GroupShardingOnDims(target, group_dims);
     auto partially_sharded = PerGroupSliceFromReplicated(
@@ -1339,7 +1338,7 @@ PartitionedHlo PartitionedHlo::Replicate() const {
 
   // 'Tiled' to 'Replicated'.
   std::vector<int64_t> all_dims(shape.dimensions().size());
-  std::iota(all_dims.begin(), all_dims.end(), 0);
+  absl::c_iota(all_dims, 0);
   HloInstruction* result = ReplicatePartial(all_dims);
   result->set_sharding(HloSharding::Replicate());
   return update_cache(PartitionedHlo(result, base_shape_, state_));
@@ -1683,7 +1682,7 @@ HloSharding GetAllToAllSharding(const HloSharding& source_sharding,
     }
 
     std::vector<int> permutation(shape_1_dims.size());
-    std::iota(permutation.begin(), permutation.end(), 0);
+    absl::c_iota(permutation, 0);
     std::swap(permutation[added_source_dim], permutation[added_target_dim]);
     std::vector<int64_t> shape_2_dims(result.dimensions().begin(),
                                       result.dimensions().end());
@@ -1995,7 +1994,7 @@ PartitionedHlo PartitionedHlo::TryMultipleSourceTargetDims(
       HloInstruction::CreateReshape(transpose_0->shape(), all_to_all));
 
   std::vector<int64_t> permutation_1(base_shape_.dimensions().size());
-  std::iota(permutation_1.begin(), permutation_1.end(), num_eligible_dims);
+  absl::c_iota(permutation_1, num_eligible_dims);
   for (int64_t i = 0; i < num_eligible_dims; ++i) {
     auto it = absl::c_find(permutation_1,
                            eligible_source_dims[i] + num_eligible_dims);
@@ -2268,7 +2267,7 @@ std::optional<PartitionedHlo> PartitionedHlo::TryComplexReshardHandling(
             << sharding().ToString();
     std::vector<int64_t> transpose_dims(
         sharding().tile_assignment().num_dimensions(), 0);
-    std::iota(transpose_dims.begin(), transpose_dims.end(), 0);
+    absl::c_iota(transpose_dims, 0);
     std::swap(transpose_dims[first_different_dimension], transpose_dims.back());
     auto intermediate_sharding =
         hlo_sharding_util::TransposeSharding(sharding(), transpose_dims);
@@ -3969,31 +3968,30 @@ absl::Status SpmdPartitioningVisitor::HandleDynamicUpdateSlice(
     }
   }
 
+  // Refer to go/dus-spmd for more details.
   DynamicUpdateSliceAnalysis analysis = AnalyzeDynamicUpdateSlice(hlo);
 
-  // Method 1. Replicate the slice dimensions for all involved tensors.
-  if (analysis.method == DynamicUpdateSliceMethod::kDefault) {
-    return HandleDUSDefault(hlo, input_tensor, update_tensor, new_indices,
-                            analysis.slice_dims);
-  }
-
-  // Method 2. Keep the sharding for input and output since the update is fully
-  // contained in a single partition.
+  // Keep the sharding for input and output since the update is fully contained
+  // in a single partition.
   if (analysis.method == DynamicUpdateSliceMethod::kUpdateOnASinglePartition) {
     return HandleDUSSinglePartitionUpdate(hlo, input_tensor, update_tensor,
                                           new_indices, analysis.slice_dims,
                                           analysis.partitioned_slice_dims);
   }
 
-  // Method 3: All partitioned slice dimensions have compile-time constant
-  // indices.
+  // All partitioned slice dimensions have compile-time constant indices. It is
+  // currently enabled for enzyme only.
   if (analysis.method == DynamicUpdateSliceMethod::
                              kAllPartitionedSliceDimsHaveConstantIndices &&
       module_->config().debug_options().xla_enable_enzyme_comms_opt()) {
     return HandleDUSAllPartitionedSliceDimsHaveConstantIndices(
         hlo, input_tensor, update_tensor);
   }
-  return absl::OkStatus();
+
+  // The default method is to replicate the slice dimensions for all involved
+  // tensors.
+  return HandleDUSDefault(hlo, input_tensor, update_tensor, new_indices,
+                          analysis.slice_dims);
 }
 
 absl::Status SpmdPartitioningVisitor::HandleGetTupleElement(
@@ -4602,7 +4600,7 @@ absl::Status SpmdPartitioningVisitor::HandleRng(HloInstruction* hlo) {
   } else {
     std::vector<int64_t> group_dims(
         hlo->sharding().tile_assignment().num_dimensions() - 1);
-    std::iota(group_dims.begin(), group_dims.end(), 0);
+    absl::c_iota(group_dims, 0);
     auto sharding_grouped =
         hlo_sharding_util::GroupShardingOnDims(hlo->sharding(), group_dims);
     auto per_group_state = CreatePerGroupPartitioningState(
@@ -4956,8 +4954,8 @@ absl::Status SpmdPartitioningVisitor::HandlePartitionId(HloInstruction* hlo) {
 }
 
 absl::Status SpmdPartitioningVisitor::HandleRaggedDot(HloInstruction* hlo) {
-  LOG(WARNING) << "You have to use Shardy for RaggedDot. If not, the behavior "
-                  "is undefined.";
+  CHECK(hlo->parent()->parent()->config().use_shardy_partitioner())
+      << "RaggedDot is only supported with Shardy.";
 
   const RaggedDotDimensionNumbers& ragged_dot_dnums =
       hlo->ragged_dot_dimension_numbers();
