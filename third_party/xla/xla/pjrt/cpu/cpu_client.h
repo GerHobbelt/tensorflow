@@ -455,8 +455,8 @@ class PjRtCpuExecutable final : public PjRtLoadedExecutable {
   // Checks that the input buffers passed in by the user have the correct size
   // on device for the compiled program.
   absl::Status CheckBufferCompatibilities(
-      absl::Span<std::pair<bool, TrackedCpuDeviceBuffer*> const> input_buffers)
-      const;
+      absl::Span<const CommonPjRtBuffer::ScopedHold> input_buffers,
+      absl::Span<PjRtBuffer* const> argument_handles) const;
 
   absl::StatusOr<Result> ExecuteHelper(
       absl::Span<PjRtBuffer* const> argument_handles, int replica,
@@ -500,6 +500,9 @@ class PjRtCpuExecutable final : public PjRtLoadedExecutable {
   // addressable_device_logical_ids_[i] is assigned. shared_ptrs instead of
   // unique_ptrs to play well with the Python bindings (see xla.cc).
   std::vector<PjRtDevice*> addressable_devices_;
+
+  // Cached list of memory spaces per output.
+  std::vector<int> output_memory_space_kind_ids_;
 
   // Cached result of comparing HloCostAnalysis FLOP estimate for execute
   // critical path.
