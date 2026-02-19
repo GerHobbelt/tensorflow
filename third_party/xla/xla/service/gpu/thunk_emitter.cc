@@ -844,9 +844,9 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitNormThunk(
     TF_ASSIGN_OR_RETURN(dscale_slice, GetAllocationSliceForHlo(instr, {1}));
     TF_ASSIGN_OR_RETURN(dbias_slice, GetAllocationSliceForHlo(instr, {2}));
   }
-  TF_ASSIGN_OR_RETURN(BufferAllocation::Slice scratch_slice,
-                      GetAllocationSliceForHlo(
-                          instr, {instr->shape().tuple_shapes_size() - 1}));
+  TF_ASSIGN_OR_RETURN(
+      ShapedSlice scratch_slice,
+      GetShapedSliceForHlo(instr, {instr->shape().tuple_shapes_size() - 1}));
 
   GpuNormDescriptor descriptor;
   descriptor.backend_config = backend_config;
@@ -854,6 +854,8 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitNormThunk(
   descriptor.x_shape = instr->operand(0)->shape();
   descriptor.scale_shape = instr->operand(1)->shape();
   descriptor.y_or_dx_shape = ShapeUtil::GetSubshape(instr->shape(), {0});
+  descriptor.scratch_shape = scratch_slice.shape;
+
   if (backend_config.kind() ==
           xla::gpu::CudnnNormBackendConfig::LAYER_FWD_INFER ||
       backend_config.kind() ==
@@ -880,7 +882,7 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitNormThunk(
                         std::move(descriptor), x_slice, scale_slice,
                         y_or_dx_slice, bias_slice, expectation_slice,
                         norm_factor_slice, dy_slice, dscale_slice, dbias_slice,
-                        scratch_slice));
+                        scratch_slice.slice));
   return GetThunkSequence(std::move(thunk));
 }
 
@@ -2194,7 +2196,7 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitCopyStartThunk(
                       GetAllocationSliceForHlo(src, {}));
   const Shape& shape = copy_start_instr->shape();
   CHECK(shape.IsTuple());
-  int host_memory_space = static_cast<int>(stream_executor::MemoryType::kHost);
+  int host_memory_space = static_cast<int>(stream_executor::MemorySpace::kHost);
   TF_ASSIGN_OR_RETURN(bool is_dst_host_memory,
                       ShapeHasHostMemorySpace(shape, 0, host_memory_space));
   TF_ASSIGN_OR_RETURN(bool is_src_host_memory,
@@ -2204,7 +2206,7 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitCopyStartThunk(
         absl::StrFormat("Copy-start %s doesn't have correct host memory space "
                         "color S(%d)",
                         copy_start_instr->ToString(),
-                        static_cast<int>(stream_executor::MemoryType::kHost)));
+                        static_cast<int>(stream_executor::MemorySpace::kHost)));
   }
   const ExecutionStreamAssignment& stream_assignment =
       ir_emitter_context_->execution_stream_assignment();
