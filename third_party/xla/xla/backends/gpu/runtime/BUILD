@@ -2878,9 +2878,9 @@ xla_test(
 )
 
 cc_library(
-    name = "thunk_checksum_tracing_pass",
-    srcs = ["thunk_checksum_tracing_pass.cc"],
-    hdrs = ["thunk_checksum_tracing_pass.h"],
+    name = "thunk_buffer_debug_pass",
+    srcs = ["thunk_buffer_debug_pass.cc"],
+    hdrs = ["thunk_buffer_debug_pass.h"],
     deps = [
         ":buffers_checksum_thunk",
         ":custom_call_thunk",
@@ -2911,15 +2911,15 @@ cc_library(
 )
 
 xla_cc_test(
-    name = "thunk_checksum_tracing_pass_test",
-    srcs = ["thunk_checksum_tracing_pass_test.cc"],
+    name = "thunk_buffer_debug_pass_test",
+    srcs = ["thunk_buffer_debug_pass_test.cc"],
     deps = [
         ":buffers_checksum_thunk",
         ":custom_call_thunk",
         ":sequential_thunk",
         ":thunk",
+        ":thunk_buffer_debug_pass",
         ":thunk_buffer_id",
-        ":thunk_checksum_tracing_pass",
         ":thunk_id",
         ":thunk_pass_pipeline",
         "//xla:literal_util",
@@ -3134,5 +3134,35 @@ cc_library(
     compatible_with = get_compatible_with_portable(),
     deps = [
         ":thunk_buffer_id",
+        "//xla/tsl/lib/gtl:int_type",
+    ],
+)
+
+cc_library(
+    name = "buffer_debug_log_entry_metadata_store",
+    srcs = ["buffer_debug_log_entry_metadata_store.cc"],
+    hdrs = ["buffer_debug_log_entry_metadata_store.h"],
+    compatible_with = get_compatible_with_portable(),
+    deps = [
+        ":buffer_debug_log_proto_cc",
+        ":buffer_debug_log_structs",
+        ":thunk_id",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/synchronization",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+xla_cc_test(
+    name = "buffer_debug_log_entry_metadata_store_test",
+    srcs = ["buffer_debug_log_entry_metadata_store_test.cc"],
+    deps = [
+        ":buffer_debug_log_entry_metadata_store",
+        ":buffer_debug_log_structs",
+        ":thunk_buffer_id",
+        ":thunk_id",
+        "//xla/tsl/util/proto:proto_matchers",
+        "@com_google_googletest//:gtest_main",
     ],
 )
