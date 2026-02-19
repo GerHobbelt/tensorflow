@@ -426,7 +426,6 @@ cc_library(
     name = "sdc_log",
     srcs = ["sdc_log.cc"],
     hdrs = ["sdc_log.h"],
-    tags = ["gpu"],
     deps = [
         "//xla/backends/gpu/runtime:sdc_log_structs",
         "//xla/backends/gpu/runtime:sdc_proto_cc",
@@ -1235,6 +1234,31 @@ xla_test(
         "//xla/stream_executor/gpu:gpu_test_kernels",
         "//xla/tsl/platform:status_matchers",
         "//xla/tsl/platform:statusor",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:status_matchers",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+xla_test(
+    name = "cuda_executor_multigpu_test",
+    srcs = ["cuda_executor_multigpu_test.cc"],
+    backend_tags = {
+        "gpu": [
+            "multi_gpu",
+            "no_oss",
+        ],
+    },
+    backends = ["gpu"],
+    tags = ["cuda-only"],
+    deps = [
+        ":cuda_executor",
+        ":cuda_platform",
+        "//xla/stream_executor:device_memory",
+        "//xla/stream_executor:platform",
+        "//xla/stream_executor:platform_manager",
+        "//xla/stream_executor:stream_executor_h",
+        "//xla/stream_executor/gpu:gpu_init",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:status_matchers",
         "@com_google_googletest//:gtest_main",

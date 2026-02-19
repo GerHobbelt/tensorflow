@@ -157,6 +157,7 @@ namespace arith = ::mlir::arith;
 namespace ttir = ::mlir::triton;
 namespace mtx = ::mlir::triton::xla;
 namespace stablehlo = ::mlir::stablehlo;
+namespace xgt = ::xla::gpu::triton;
 
 using ::llvm::SmallVector;
 using ::mlir::AffineMap;
@@ -1007,6 +1008,14 @@ absl::StatusOr<ScalarOrTensor> EmitDot(
       /*lowerBound=*/MakeIndex(b, 0),
       /*upperBound=*/MakeIndex(b, loop_iteration_count),
       /*step=*/MakeIndex(b, 1), accumulator);
+
+  if (fusion->GetModule()
+          ->config()
+          .debug_options()
+          .xla_gpu_experimental_enable_triton_warp_specialization()) {
+    for_op->setAttr("tt.warp_specialize", b.getBoolAttr(true));
+  }
+
   {  // Loop body.
     mlir::OpBuilder::InsertionGuard g(b);
     b.setInsertionPointToStart(for_op.getBody());
@@ -1921,35 +1930,6 @@ void EmitReturnOp(EmitterLocOpBuilder b, absl::string_view fusion_kind) {
   }
 }
 
-absl::StatusOr<stream_executor::gpu::TmaMetadata> ExtractTmaMetadata(
-    mlir::ModuleOp triton_module, absl::string_view kernel_name) {
-  stream_executor::gpu::TmaMetadata tma_metadata;
-  SmallVector<mlir::LLVM::LLVMFuncOp> func_ops;
-  for (auto func : triton_module.getOps<mlir::LLVM::LLVMFuncOp>()) {
-    // Custom calls will also match to LLVMFuncOp, so we are only interested in
-    // the entry function.
-    if (func.getName().str() == kernel_name) {
-      func_ops.push_back(func);
-    }
-  }
-  CHECK_EQ(func_ops.size(), 1)
-      << "Expected a single LLVMFuncOp in the module for the entry function.";
-
-  for (auto [idx, arg] : llvm::enumerate(func_ops[0].getArguments())) {
-    if (auto attr = func_ops[0].getArgAttrOfType<mtx::TmaDescriptorAttr>(
-            idx, "tt.tma_descriptor")) {
-      TF_ASSIGN_OR_RETURN(
-          auto tma_desc,
-          CreateTmaDescriptor(attr.getGlobalShape(), attr.getTileShape(),
-                              attr.getTileStrides(), attr.getLayout(),
-                              attr.getElementByteSize(),
-                              attr.getSwizzleMode().getValue()));
-      tma_metadata.arg_index_to_tma_info.insert({idx, tma_desc});
-    }
-  }
-  return tma_metadata;
-}
-
 absl::StatusOr<mlir::OwningOpRef<mlir::ModuleOp>> CreateTritonModule(
     absl::string_view fn_name, const HloFusionInstruction* fusion,
     const se::DeviceDescription& device_info,
@@ -2213,7 +2193,7 @@ absl::StatusOr<TritonWrapperResult> CompileTritonToLLVM(
   // It's okay for tma_metadata to be empty; it's only populated when used
   // explicitly.
   TF_ASSIGN_OR_RETURN(stream_executor::gpu::TmaMetadata tma_metadata,
-                      ExtractTmaMetadata(triton_module, kernel_name));
+                      xgt::ExtractTmaMetadata(triton_module, kernel_name));
 
   return {
       {shared_mem_bytes, cluster_dim, tma_metadata, captured_nvvm_annotations}};
