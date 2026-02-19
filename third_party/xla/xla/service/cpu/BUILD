@@ -612,7 +612,6 @@ cc_library(
     ] + if_onednn([
         ":onednn_convolution",
         ":onednn_matmul",
-        ":onednn_softmax",
     ]),
 )
 
@@ -1823,7 +1822,6 @@ onednn_cc_library(
     srcs = ["onednn_softmax.cc"],
     hdrs = [
         "onednn_softmax.h",
-        "//xla/tsl/util:onednn_util_hdrs",
     ],
     copts = runtime_copts() + tsl_copts(),
     visibility = ["//visibility:public"],
@@ -1860,7 +1858,6 @@ onednn_cc_library(
         "onednn_contraction_rewriter.h",
         "onednn_convolution.h",
         "onednn_matmul.h",
-        "//xla/tsl/util:onednn_util_hdrs",
     ],
     copts = tsl_copts(),
     deps = [
@@ -1877,6 +1874,7 @@ onednn_cc_library(
         "//xla:status_macros",
         "//xla:types",
         "//xla:util",
+        "//xla/backends/cpu/runtime/onednn:onednn_threadpool",
         "//xla/hlo/evaluator:hlo_evaluator",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/pass:hlo_pass",
