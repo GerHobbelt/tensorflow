@@ -504,6 +504,7 @@ xla_cc_test(
         ":collective_pipeliner_utils",
         ":hlo_module_config",
         ":hlo_verifier",
+        ":host_offload_utils",
         ":legalize_scheduling_annotations",
         ":memory_annotations_hdr",
         ":scheduling_annotations_util",
@@ -5816,34 +5817,34 @@ xla_aot_compile_cpu(
 xla_aot_compile_gpu(
     name = "xla_aot_compile_test_gpu_executable",
     autotune_results = "xla_aot_compile_test_autotune_results.txtpb",
-    gpu_target_config = "//xla/tools/hlo_opt:gpu_specs/h100_sxm.txtpb",
+    gpu_target_config = "//xla/backends/gpu:specs/h100_sxm.txtpb",
     module = "xla_aot_compile_test.mlir",
 )
 
 xla_aot_compile_gpu(
     name = "xla_aot_compile_test_gpu_executable_hlo",
     autotune_results = "xla_aot_compile_test_autotune_results.txtpb",
-    gpu_target_config = "//xla/tools/hlo_opt:gpu_specs/h100_sxm.txtpb",
+    gpu_target_config = "//xla/backends/gpu:specs/h100_sxm.txtpb",
     module = "xla_aot_compile_test.hlo",
 )
 
 xla_aot_compile_gpu(
     name = "xla_aot_compile_test_gpu_executable_constant",
     autotune_results = "xla_aot_compile_test_autotune_results.txtpb",
-    gpu_target_config = "//xla/tools/hlo_opt:gpu_specs/h100_sxm.txtpb",
+    gpu_target_config = "//xla/backends/gpu:specs/h100_sxm.txtpb",
     module = "xla_aot_compile_test_constant.mlir",
 )
 
 xla_aot_compile_gpu(
     name = "xla_aot_compile_test_gpu_executable_convolution",
     autotune_results = "xla_aot_compile_test_autotune_results.txtpb",
-    gpu_target_config = "//xla/tools/hlo_opt:gpu_specs/h100_sxm.txtpb",
+    gpu_target_config = "//xla/backends/gpu:specs/h100_sxm.txtpb",
     module = "xla_aot_compile_test_convolution.mlir",
 )
 
 xla_aot_compile_gpu_runtime_autotuning(
     name = "xla_aot_compile_test_gpu_executable_convolution_runtime_autotuning",
-    gpu_target_config = "//xla/tools/hlo_opt:gpu_specs/h100_sxm.txtpb",
+    gpu_target_config = "//xla/backends/gpu:specs/h100_sxm.txtpb",
     module = "xla_aot_compile_test_convolution.mlir",
 )
 

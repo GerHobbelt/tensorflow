@@ -242,19 +242,6 @@ tsl_gpu_library(
 )
 
 cc_library(
-    name = "gpu_stream",
-    srcs = ["gpu_stream.cc"],
-    hdrs = ["gpu_stream.h"],
-    tags = ["gpu"],
-    deps = [
-        ":gpu_types_header",
-        "//xla/stream_executor:stream",
-        "@com_google_absl//absl/base",
-        "@com_google_absl//absl/log:check",
-    ],
-)
-
-cc_library(
     name = "gpu_semaphore",
     srcs = ["gpu_semaphore.cc"],
     hdrs = ["gpu_semaphore.h"],
@@ -707,16 +694,16 @@ xla_test(
     srcs = ["gpu_device_info_test.cc"],
     backends = ["gpu"],
     data = [
-        "//xla/tools/hlo_opt:gpu_specs/a100_pcie_80.txtpb",
-        "//xla/tools/hlo_opt:gpu_specs/a100_sxm_40.txtpb",
-        "//xla/tools/hlo_opt:gpu_specs/a100_sxm_80.txtpb",
-        "//xla/tools/hlo_opt:gpu_specs/a6000.txtpb",
-        "//xla/tools/hlo_opt:gpu_specs/b200.txtpb",
-        "//xla/tools/hlo_opt:gpu_specs/h100_pcie.txtpb",
-        "//xla/tools/hlo_opt:gpu_specs/h100_sxm.txtpb",
-        "//xla/tools/hlo_opt:gpu_specs/mi200.txtpb",
-        "//xla/tools/hlo_opt:gpu_specs/p100.txtpb",
-        "//xla/tools/hlo_opt:gpu_specs/v100.txtpb",
+        "//xla/backends/gpu:specs/a100_pcie_80.txtpb",
+        "//xla/backends/gpu:specs/a100_sxm_40.txtpb",
+        "//xla/backends/gpu:specs/a100_sxm_80.txtpb",
+        "//xla/backends/gpu:specs/a6000.txtpb",
+        "//xla/backends/gpu:specs/b200.txtpb",
+        "//xla/backends/gpu:specs/h100_pcie.txtpb",
+        "//xla/backends/gpu:specs/h100_sxm.txtpb",
+        "//xla/backends/gpu:specs/mi200.txtpb",
+        "//xla/backends/gpu:specs/p100.txtpb",
+        "//xla/backends/gpu:specs/v100.txtpb",
     ],
     deps = [
         "//xla/service:platform_util",

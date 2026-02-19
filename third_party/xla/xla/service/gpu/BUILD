@@ -1728,11 +1728,13 @@ cc_library(
         "//xla/service:hlo_proto_cc",
         "//xla/service:hlo_value",
         "//xla/service:hlo_verifier",
+        "//xla/service:host_offload_utils",
         "//xla/service:layout_assignment",
         "//xla/service:layout_normalization",
         "//xla/service:llvm_compiler",
         "//xla/service:logical_buffer",
         "//xla/service:loop_schedule_linearizer",
+        "//xla/service:memory_annotations_hdr",
         "//xla/service:reduce_scatter_combiner",
         "//xla/service:reduce_scatter_reassociate",
         "//xla/service:scatter_determinism_expander",
@@ -2320,9 +2322,7 @@ xla_cc_test(
         "no_oss",
         "nomsan",  # Pulls in precompiled NVIDIA libraries which cause false positives in msan.
         "requires-gpu-nvidia",
-    ] + if_google([
-        "ignore_for_dep=third_party/tensorflow/compiler/xla/service/gpu/amdgpu_compiler.h",
-    ]),
+    ],
     deps = if_cuda_is_configured([
         ":nvptx_compiler_impl",
         "//xla/stream_executor:cuda_platform",
@@ -2363,7 +2363,6 @@ cc_library(
     ],
     tags = [
         "gpu",
-        "manual",
         "rocm-only",
     ],
     deps = [
@@ -2384,7 +2383,6 @@ cc_library(
     ],
     tags = [
         "gpu",
-        "manual",
         "rocm-only",
     ],
     deps = [
