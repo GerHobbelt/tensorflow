@@ -75,6 +75,7 @@ limitations under the License.
 #include "xla/core/host_offloading/hlo_host_device_type_call_wrapper.h"
 #include "xla/core/host_offloading/host_compute_asyncifier.h"
 #include "xla/hlo/analysis/alias_info.h"
+#include "xla/hlo/analysis/symbolic_expr.h"
 #include "xla/hlo/builder/xla_computation.h"
 #include "xla/hlo/ir/hlo_casting_utils.h"
 #include "xla/hlo/ir/hlo_computation.h"
@@ -317,6 +318,7 @@ limitations under the License.
 #include "xla/stream_executor/semantic_version.h"
 #include "xla/stream_executor/stream_executor.h"
 #include "xla/tsl/platform/env.h"
+#include "xla/tsl/platform/errors.h"
 #include "xla/tsl/platform/statusor.h"
 #include "xla/tsl/platform/threadpool.h"
 #include "xla/util.h"
@@ -441,7 +443,9 @@ GpuCompiler::GpuCompiler(se::Platform::Id platform_id,
       target_triple_(target_triple),
       data_layout_(data_layout),
       pointer_size_(llvm::DataLayout(data_layout)
-                        .getPointerSize(0 /* default address space */)) {}
+                        .getPointerSize(0 /* default address space */)) {
+  RegisterSymbolicExprStorage(&mlir_context_);
+}
 
 namespace {
 // Adds the HloVerifier for GPU to the given pipeline.
@@ -1216,7 +1220,7 @@ void AddDoubleBufferingPasses(const HloModule& module,
   }
   if (opts.xla_gpu_enable_while_loop_unrolling() ==
       DebugOptions::WHILE_LOOP_UNROLLING_FULL_UNROLL) {
-    LOG_IF(WARNING, unroll_strategy != std::nullopt)
+    LOG_IF(WARNING, unroll_strategy.has_value())
         << "Overriding double buffering set via "
            "`xla_gpu_enable_while_loop_double_buffering` flag.";
     unroll_strategy = DoubleBufferLoopUnrolling::UnrollStrategy::kFullUnroll;
@@ -1227,7 +1231,7 @@ void AddDoubleBufferingPasses(const HloModule& module,
       !opts.xla_gpu_enable_while_loop_double_buffering()) {
     unroll_strategy = DoubleBufferLoopUnrolling::UnrollStrategy::kAuto;
   }
-  if (unroll_strategy != std::nullopt) {
+  if (unroll_strategy.has_value()) {
     pipeline.AddPass<WhileLoopSimplifier>();
     pipeline.AddPass<DoubleBufferLoopUnrolling>(*unroll_strategy);
     pipeline.AddPass<TupleSimplifier>();

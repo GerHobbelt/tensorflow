@@ -39,6 +39,7 @@ limitations under the License.
 #include "xla/autotuning.pb.h"
 #include "xla/backends/gpu/autotuner/gpu_codegen_backend.h"
 #include "xla/error_spec.h"
+#include "xla/hlo/analysis/symbolic_expr.h"
 #include "xla/hlo/ir/hlo_casting_utils.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_instructions.h"
@@ -70,6 +71,8 @@ limitations under the License.
 #include "xla/tests/hlo_test_base.h"
 #include "xla/tests/test_utils.h"
 #include "xla/tools/hlo_decomposer.h"
+#include "xla/tsl/distributed_runtime/call_options.h"
+#include "xla/tsl/distributed_runtime/coordination/coordination_service_agent.h"
 #include "xla/tsl/lib/core/status_test_util.h"
 #include "xla/tsl/platform/env.h"
 #include "xla/tsl/platform/errors.h"
@@ -184,6 +187,7 @@ class StatelessAutotunerTest : public HloTestBase {
   void SetUp() override {
     AutotunerUtil::ClearAutotuneResults();
     HloTestBase::SetUp();
+    RegisterSymbolicExprStorage(&mlir_context_);
   }
 
   void TearDown() override {
@@ -1225,6 +1229,15 @@ class KeyValueStoreForTest : public KeyValueStoreInterface {
     }
 
     return absl::NotFoundError(absl::StrCat("Key not found: ", key));
+  }
+
+  std::shared_ptr<tsl::CallOptions> AsyncGet(
+      absl::string_view key,
+      tsl::CoordinationServiceAgent::StatusOrValueCallback done) override {
+    absl::Status status = absl::UnimplementedError(
+        "AsyncGet is not supported in KeyValueStoreForTest.");
+    done(status);
+    return nullptr;
   }
 
   absl::Status Set(absl::string_view key, absl::string_view value) override {
