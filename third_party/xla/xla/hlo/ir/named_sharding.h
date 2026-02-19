@@ -47,6 +47,8 @@ class NamedSharding {
 
     absl::Span<const AxisRef> axes() const { return axes_; }
 
+    int64_t getShardedSize(const Mesh& mesh) const;
+
    private:
     std::vector<AxisRef> axes_;
     bool is_closed_;
@@ -71,7 +73,7 @@ class NamedSharding {
                          absl::Span<const AxisRef> unreduced_axes = {},
                          absl::Span<const OpMetadata> metadata = {})
       : mesh_(std::move(mesh)),
-        dim_shardings_(dim_shardings.begin(), dim_shardings.end()),
+        dim_shardings_(CanonicalizedDimShardings(dim_shardings)),
         replicated_axes_(replicated_axes.begin(), replicated_axes.end()),
         unreduced_axes_(unreduced_axes.begin(), unreduced_axes.end()),
         metadata_(metadata.begin(), metadata.end()) {}
@@ -84,8 +86,34 @@ class NamedSharding {
   absl::Span<const AxisRef> unreduced_axes() const { return unreduced_axes_; }
   absl::Span<const OpMetadata> metadata() const { return metadata_; }
 
+  // Returns number of dimensions.
+  int64_t num_dimensions() const { return dim_shardings_.size(); }
+
+  // Returns size of the given dimension.
+  int64_t dimension(int64_t dim) const {
+    return dim_shardings_[dim].getShardedSize(mesh_);
+  }
+
+  // Returns the total number of devices used by sharding.
+  int64_t num_devices() const {
+    return mesh_.device_assignment().num_elements();
+  }
+
  private:
   friend class HloSharding;
+
+  std::vector<DimensionSharding> CanonicalizedDimShardings(
+      absl::Span<const DimensionSharding> dim_shardings) const {
+    bool all_dims_empty = absl::c_all_of(
+        dim_shardings,
+        [](const DimensionSharding& ds) { return ds.axes().empty(); });
+
+    if (all_dims_empty) {
+      return {};
+    }
+    return std::vector<DimensionSharding>(dim_shardings.begin(),
+                                          dim_shardings.end());
+  }
 
   // Creates a sharding with empty mesh and no sharding axes depicting it is
   // replicated across all devices.
