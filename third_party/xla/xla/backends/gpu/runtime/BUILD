@@ -246,6 +246,7 @@ xla_test(
         ":shaped_slice",
         ":thunk",
         "//xla:shape_util",
+        "//xla:xla_data_proto_cc",
         "//xla/runtime:buffer_use",
         "//xla/service:buffer_assignment",
         "//xla/service:executable",
@@ -798,6 +799,7 @@ cc_library(
     deps = [
         ":copy_thunk",
         ":thunk",
+        ":thunk_proto_cc",
         "//xla/hlo/ir:hlo",
         "//xla/stream_executor:event",
         "//xla/stream_executor:stream",
@@ -806,6 +808,21 @@ cc_library(
         "@com_google_absl//absl/base",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
+    ],
+)
+
+xla_cc_test(
+    name = "copy_done_thunk_test",
+    srcs = ["copy_done_thunk_test.cc"],
+    deps = [
+        ":copy_done_thunk",
+        ":copy_thunk",
+        ":thunk",
+        ":thunk_proto_cc",
+        "//xla/tsl/platform:statusor",
+        "//xla/tsl/util/proto:parse_text_proto",
+        "@com_google_absl//absl/base",
+        "@com_google_googletest//:gtest_main",
     ],
 )
 
@@ -881,6 +898,7 @@ xla_cc_test(
     name = "device_to_host_copy_thunk_test",
     srcs = ["device_to_host_copy_thunk_test.cc"],
     deps = [
+        ":copy_thunk",
         ":device_to_host_copy_thunk",
         ":thunk",
         ":thunk_proto_cc",
@@ -897,6 +915,7 @@ xla_cc_test(
     name = "host_to_device_copy_thunk_test",
     srcs = ["host_to_device_copy_thunk_test.cc"],
     deps = [
+        ":copy_thunk",
         ":host_to_device_copy_thunk",
         ":thunk",
         ":thunk_proto_cc",
@@ -1011,6 +1030,7 @@ cc_library(
     deps = [
         ":collective_clique_requests",
         ":collective_cliques",
+        ":collective_memory",
         ":collective_params",
         ":custom_call_target",
         ":thunk",
@@ -2149,6 +2169,35 @@ xla_cc_test(
 )
 
 cc_library(
+    name = "collective_memory",
+    srcs = ["collective_memory.cc"],
+    hdrs = ["collective_memory.h"],
+    # copybara:uncomment compatible_with = ["//buildenv/target:non_prod"],
+    deps = [
+        ":collective_cliques",
+        ":collective_memory_requests",
+        ":collective_params",
+        "//xla:util",
+        "//xla/backends/gpu/collectives:gpu_clique_key",
+        "//xla/backends/gpu/collectives:gpu_communicator",
+        "//xla/core/collectives:rank_id",
+        "//xla/core/collectives:symmetric_memory",
+        "//xla/service:buffer_assignment",
+        "//xla/service/gpu:buffer_allocations",
+        "//xla/stream_executor:device_address",
+        "//xla/tsl/platform:status_macros",
+        "//xla/tsl/util:safe_reinterpret_cast",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/time",
+        "@tsl//tsl/profiler/lib:traceme",
+    ],
+)
+
+cc_library(
     name = "collective_multimem",
     srcs = ["collective_multimem.cc"],
     hdrs = ["collective_multimem.h"],
@@ -2768,6 +2817,7 @@ cc_library(
     deps = [
         ":collective_clique_requests",
         ":collective_cliques",
+        ":collective_memory",
         ":collective_memory_requests",
         ":collective_multimem_registry",
         ":collective_params",
@@ -2781,6 +2831,7 @@ cc_library(
         "//xla/ffi:execution_context",
         "//xla/hlo/ir:hlo",
         "//xla/runtime:buffer_use",
+        "//xla/runtime:resource_use",
         "//xla/service:buffer_assignment",
         "//xla/service:executable",
         "//xla/service/gpu:backend_configs_cc",
@@ -3407,6 +3458,7 @@ cc_library(
         ":conditional_thunk",
         ":convolution_reorder_thunk",
         ":convolution_thunk",
+        ":copy_done_thunk",
         ":copy_thunk",
         ":cub_sort_thunk",
         ":cudnn_thunk",
@@ -3459,6 +3511,7 @@ xla_cc_test(
     srcs = ["thunk_proto_deserialization_test.cc"],
     deps = [
         ":conditional_thunk",
+        ":copy_done_thunk",
         ":copy_thunk",
         ":custom_kernel_thunk",
         ":device_to_device_copy_thunk",
