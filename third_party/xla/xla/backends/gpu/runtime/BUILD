@@ -869,10 +869,6 @@ cc_library(
 xla_test(
     name = "kernel_thunk_test",
     srcs = ["kernel_thunk_test.cc"],
-    backend_tags = {
-        # TODO(b/445172709): Re-enable once fixed.
-        "b200": ["broken"],
-    },
     backends = ["gpu"],
     deps = [
         ":command_buffer_cmd",
@@ -1071,11 +1067,13 @@ cc_library(
     deps = [
         ":collective_thunk",
         ":thunk",
+        "//xla:future",
         "//xla:shape_util",
         "//xla/backends/gpu/collectives:gpu_clique_key",
         "//xla/backends/gpu/collectives:gpu_collectives",
         "//xla/backends/gpu/collectives:gpu_communicator",
         "//xla/core/collectives:communicator",
+        "//xla/hlo/ir:collective_op_group_mode",
         "//xla/hlo/ir:hlo",
         "//xla/service:collective_ops_utils",
         "//xla/service/gpu:backend_configs_cc",
@@ -1178,6 +1176,7 @@ cc_library(
         ":collective_kernel_thunk",
         ":collective_thunk",
         ":thunk",
+        "//xla:future",
         "//xla:status_macros",
         "//xla:xla_data_proto_cc",
         "//xla/backends/gpu/collectives:gpu_clique_key",
@@ -1252,6 +1251,7 @@ cc_library(
         ":collective_thunk",
         ":ragged_all_to_all",
         ":thunk",
+        "//xla:future",
         "//xla:shape_util",
         "//xla:xla_data_proto_cc",
         "//xla/backends/gpu/collectives:gpu_clique_key",
@@ -1295,6 +1295,7 @@ cc_library(
     deps = [
         ":collective_thunk",
         ":thunk",
+        "//xla:future",
         "//xla:xla_data_proto_cc",
         "//xla/backends/gpu/collectives:gpu_clique_key",
         "//xla/backends/gpu/collectives:gpu_collectives",
@@ -1502,6 +1503,7 @@ cc_library(
         ":collective_thunk",
         ":thunk",
         ":thunk_id",
+        "//xla:future",
         "//xla:util",
         "//xla/backends/gpu/collectives:gpu_clique_key",
         "//xla/backends/gpu/collectives:gpu_communicator",
@@ -2135,6 +2137,7 @@ cc_library(
     srcs = ["ragged_all_to_all.cc"],
     hdrs = ["ragged_all_to_all.h"],
     deps = [
+        "//xla:future",
         "//xla:shape_util",
         "//xla:types",
         "//xla:util",
@@ -2365,6 +2368,7 @@ cc_library(
         "//xla/backends/gpu/collectives:gpu_collectives",
         "//xla/core/collectives:communicator",
         "//xla/core/collectives:rank_id",
+        "//xla/hlo/ir:collective_op_group_mode",
         "//xla/hlo/ir:hlo",
         "//xla/service:collective_ops_utils",
         "//xla/service:computation_placer",
@@ -2460,6 +2464,7 @@ cc_library(
         "//xla:xla_data_proto_cc",
         "//xla/backends/gpu/collectives:gpu_collectives",
         "//xla/core/collectives:communicator",
+        "//xla/hlo/ir:collective_op_group_mode",
         "//xla/hlo/ir:hlo",
         "//xla/service:collective_ops_utils",
         "//xla/service:computation_placer",
@@ -2467,6 +2472,7 @@ cc_library(
         "//xla/service/gpu/transforms/collectives:collective_ops_utils",
         "//xla/stream_executor:stream",
         "//xla/tsl/concurrency:async_value",
+        "//xla/tsl/platform:errors",
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
