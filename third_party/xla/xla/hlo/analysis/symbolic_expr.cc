@@ -17,7 +17,6 @@ limitations under the License.
 
 #include <algorithm>
 #include <cassert>
-#include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -940,6 +939,10 @@ SymbolicExpr SymbolicExprContext::CreateBinaryOp(SymbolicExprType type,
 
 SymbolicExpr SymbolicExprContext::Parse(absl::string_view expr_str) {
   return Parser(expr_str, this).Parse();
+}
+
+bool SymbolicExprContext::operator==(const SymbolicExprContext& other) const {
+  return mlir_context_ == other.mlir_context_;
 }
 
 void SymbolicExpr::Walk(
