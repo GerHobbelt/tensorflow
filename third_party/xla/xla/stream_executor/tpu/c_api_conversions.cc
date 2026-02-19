@@ -15,7 +15,6 @@ limitations under the License.
 
 #include "xla/stream_executor/tpu/c_api_conversions.h"
 
-#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -66,9 +65,9 @@ static void CreateVectorBase(const absl::Span<Src> src, DstList* dst) {
   dst->size = src.size();
   if (dst->size > TPU_C_API_MAX_INLINED) {
     dst->heap = new Dst[dst->size];
-    std::copy(src.begin(), src.end(), dst->heap);
+    absl::c_copy(src, dst->heap);
   } else {
-    std::copy(src.begin(), src.end(), dst->inlined);
+    absl::c_copy(src, dst->inlined);
   }
 }
 
@@ -158,9 +157,9 @@ xla::ShapedBuffer FromC(XLA_ShapedBuffer* c_buffer) {
   return xla_shaped_buffer;
 }
 
-SE_MaybeOwningDeviceMemory ToC(xla::MaybeOwningDeviceAddress& mem,
-                               bool aliased) {
-  SE_MaybeOwningDeviceMemory se_mem;
+SE_MaybeOwningDeviceAddress ToC(xla::MaybeOwningDeviceAddress& mem,
+                                bool aliased) {
+  SE_MaybeOwningDeviceAddress se_mem;
   se_mem.owned = mem.HasOwnership();
   se_mem.memory = ApiConverter::ToC(mem.AsDeviceAddress());
   if (mem.HasOwnership()) {
@@ -181,7 +180,7 @@ SE_MaybeOwningDeviceMemory ToC(xla::MaybeOwningDeviceAddress& mem,
 }
 
 xla::MaybeOwningDeviceAddress FromC(
-    SE_MaybeOwningDeviceMemory* se_mem,
+    SE_MaybeOwningDeviceAddress* se_mem,
     stream_executor::DeviceAddressAllocator* allocator) {
   if (se_mem->owned) {
     return xla::MaybeOwningDeviceAddress(stream_executor::OwningDeviceAddress(
@@ -244,8 +243,8 @@ stream_executor::DeviceAddressAllocator* FromC(
       c_allocator.ctx);
 }
 
-SE_MaybeOwningDeviceMemory ToC(stream_executor::OwningDeviceAddress* mem) {
-  SE_MaybeOwningDeviceMemory se_mem;
+SE_MaybeOwningDeviceAddress ToC(stream_executor::OwningDeviceAddress* mem) {
+  SE_MaybeOwningDeviceAddress se_mem;
   se_mem.device_ordinal = mem->device_ordinal();
   se_mem.memory = ApiConverter::ToC(mem->Release());
   se_mem.allocator = ApiConverter::ToC(mem->allocator());

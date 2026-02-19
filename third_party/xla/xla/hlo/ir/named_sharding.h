@@ -17,6 +17,7 @@ limitations under the License.
 #define XLA_HLO_IR_NAMED_SHARDING_H_
 
 #include <cstdint>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -38,8 +39,11 @@ class NamedSharding {
       return axes_ == other.axes_ && is_closed_ == other.is_closed_;
     }
 
-    explicit DimensionSharding(std::vector<AxisRef> axes, bool is_closed)
-        : axes_(std::move(axes)), is_closed_(is_closed) {}
+    // Note that by default we assume closed sharding.
+    explicit DimensionSharding() : is_closed_(true) {};
+
+    explicit DimensionSharding(absl::Span<const AxisRef> axes, bool is_closed)
+        : axes_(axes.begin(), axes.end()), is_closed_(is_closed) {}
 
     absl::Span<const AxisRef> axes() const { return axes_; }
 
@@ -60,8 +64,6 @@ class NamedSharding {
     return !(*this == other);
   }
 
-  const Mesh& mesh() const { return mesh_; }
-
   // TODO(b/456212087): Add validation checks
   explicit NamedSharding(Mesh mesh,
                          absl::Span<const DimensionSharding> dim_shardings = {},
@@ -73,6 +75,14 @@ class NamedSharding {
         replicated_axes_(replicated_axes.begin(), replicated_axes.end()),
         unreduced_axes_(unreduced_axes.begin(), unreduced_axes.end()),
         metadata_(metadata.begin(), metadata.end()) {}
+
+  const Mesh& mesh() const { return mesh_; }
+  absl::Span<const DimensionSharding> dim_shardings() const {
+    return dim_shardings_;
+  }
+  absl::Span<const AxisRef> replicated_axes() const { return replicated_axes_; }
+  absl::Span<const AxisRef> unreduced_axes() const { return unreduced_axes_; }
+  absl::Span<const OpMetadata> metadata() const { return metadata_; }
 
  private:
   friend class HloSharding;
@@ -117,6 +127,17 @@ class NamedSharding {
   std::vector<AxisRef> unreduced_axes_;
   std::vector<OpMetadata> metadata_;
 };
+
+// Contains test only helper functions.
+namespace test_utils {
+// Construct sharding with given mesh. 'dim_shardings', 'replicated_axes',
+// 'unreduced_axes' refer to axis names in the mesh.
+NamedSharding FromAxisNames(
+    Mesh mesh, absl::Span<const std::vector<std::string>> dim_shardings,
+    absl::Span<const std::string> replicated_axes = {},
+    absl::Span<const std::string> unreduced_axes = {},
+    absl::Span<const OpMetadata> metadata = {});
+}  // namespace test_utils
 
 }  // namespace xla
 
