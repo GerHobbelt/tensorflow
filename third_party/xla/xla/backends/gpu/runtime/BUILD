@@ -92,7 +92,9 @@ cc_library(
         "//xla/service:buffer_assignment",
         "//xla/stream_executor:command_buffer",
         "//xla/stream_executor:platform",
+        "//xla/tsl/platform:status_macros",
         "@com_google_absl//absl/container:inlined_vector",
+        "@com_google_absl//absl/functional:function_ref",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
@@ -127,6 +129,7 @@ cc_library(
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/container:inlined_vector",
         "@com_google_absl//absl/container:node_hash_map",
+        "@com_google_absl//absl/functional:function_ref",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
@@ -215,6 +218,7 @@ cc_library(
         "//xla/stream_executor/gpu:tma_metadata",
         "//xla/tsl/platform:env",
         "//xla/tsl/platform:errors",
+        "//xla/tsl/platform:status_macros",
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/base:core_headers",
@@ -1674,7 +1678,8 @@ xla_test(
     name = "collective_kernel_thunk_test",
     srcs = ["collective_kernel_thunk_test.cc"],
     backend_tags = {
-        "gpu": [
+        "h100": [
+            "full",
             "multi_gpu",
         ],
     },
@@ -2880,6 +2885,7 @@ cc_library(
         "//xla/stream_executor:stream",
         "//xla/stream_executor:stream_executor_h",
         "//xla/tsl/lib/gtl:int_type",
+        "//xla/tsl/platform:status_macros",
         "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:inlined_vector",
@@ -2916,8 +2922,8 @@ cc_library(
 )
 
 xla_cc_test(
-    name = "for_all_thunks_test",
-    srcs = ["for_all_thunks_test.cc"],
+    name = "thunk_walk_test",
+    srcs = ["thunk_walk_test.cc"],
     tags = ["gpu"],
     deps = [
         ":command_buffer_thunk",
@@ -4196,7 +4202,6 @@ cc_library(
         "//xla/service:buffer_assignment",
         "//xla/stream_executor:device_address",
         "//xla/stream_executor:device_description",
-        "//xla/stream_executor:device_memory",
         "//xla/stream_executor:launch_dim",
         "//xla/stream_executor:stream",
         "//xla/stream_executor:stream_executor_h",
@@ -4233,6 +4238,7 @@ xla_test(
     deps = [
         ":buffer_debug_log_entry_metadata_store",
         ":buffer_debug_log_structs",
+        ":buffer_debug_log_structs_test_matchers",
         ":buffers_float_check_thunk",
         ":collective_clique_requests",
         ":collective_memory_requests",
@@ -4387,6 +4393,13 @@ xla_cc_test(
         "@com_google_absl//absl/status:status_matchers",
         "@com_google_googletest//:gtest_main",
     ],
+)
+
+cc_library(
+    name = "buffer_debug_log_structs_test_matchers",
+    testonly = 1,
+    hdrs = ["buffer_debug_log_structs_test_matchers.h"],
+    deps = ["@com_google_googletest//:gtest_for_library"],
 )
 
 xla_cc_test(
