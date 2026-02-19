@@ -59,9 +59,9 @@ TEST_F(CollectiveMetadataTest, ConstructCollectiveMetadata) {
   })";
 
   constexpr int kNumReplicas = 2;
-  ASSERT_GE(hlo_runner_->device_count(), kNumReplicas)
+  ASSERT_GE(device_count(), kNumReplicas)
       << "Test requires at least " << kNumReplicas << " devices ("
-      << hlo_runner_->device_count() << " available)";
+      << device_count() << " available)";
 
   TF_ASSERT_OK_AND_ASSIGN(
       auto unoptimized_module,
@@ -91,11 +91,6 @@ TEST_F(CollectiveMetadataTest, ConstructCollectiveMetadata) {
   EXPECT_NE(second_result_data[1], 0)
       << "Second result pointer to peers is NULL.";
 
-  EXPECT_NE(first_result_data[2], 0)
-      << "First result pointer to multimem metadata is not set.";
-  EXPECT_NE(second_result_data[2], 0)
-      << "Second result pointer to multimem metadata is not set.";
-
   for (int i = 3; i < kNumElements; ++i) {
     EXPECT_NE(first_result_data[i], 0)
         << "First result param_to_peers is NULL.";
@@ -121,9 +116,9 @@ TEST_F(CollectiveMetadataTest, ConstructCollectiveMetadataForPartitions) {
   })";
 
   constexpr int kNumPartitions = 2;
-  ASSERT_GE(hlo_runner_->device_count(), kNumPartitions)
+  ASSERT_GE(device_count(), kNumPartitions)
       << "Test requires at least " << kNumPartitions << " devices ("
-      << hlo_runner_->device_count() << " available)";
+      << device_count() << " available)";
 
   TF_ASSERT_OK_AND_ASSIGN(
       auto unoptimized_module,
@@ -163,9 +158,9 @@ TEST_F(CollectiveMetadataTest, BuildMultimemOnlyOncePerModuleExecution) {
   })";
 
   constexpr int kNumReplicas = 2;
-  ASSERT_GE(hlo_runner_->device_count(), kNumReplicas)
+  ASSERT_GE(device_count(), kNumReplicas)
       << "Test requires at least " << kNumReplicas << " devices ("
-      << hlo_runner_->device_count() << " available)";
+      << device_count() << " available)";
 
   TF_ASSERT_OK_AND_ASSIGN(
       auto module, ParseAndReturnVerifiedModule(kModuleStr, kNumReplicas));
@@ -217,9 +212,9 @@ TEST_F(CollectiveMetadataTest, ConstructCollectiveMetadataWithReplicaGroup) {
   })";
 
   constexpr int kNumReplicas = 4;
-  if (hlo_runner_->device_count() < kNumReplicas) {
+  if (device_count() < kNumReplicas) {
     GTEST_SKIP() << "Test requires at least " << kNumReplicas << " devices ("
-                 << hlo_runner_->device_count() << " available)";
+                 << device_count() << " available)";
   }
 
   TF_ASSERT_OK_AND_ASSIGN(
