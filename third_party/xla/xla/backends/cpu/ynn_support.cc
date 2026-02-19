@@ -280,9 +280,7 @@ bool IsConvolutionOpSupportedByYnn(const HloInstruction* instr) {
   // Stores tuple of allowed (input, output) dtypes.
   static const absl::NoDestructor<absl::flat_hash_set<
       std::tuple<PrimitiveType, PrimitiveType, PrimitiveType>>>
-      kAllowedTypes({
-          {F32, F32, F32},
-      });
+      kAllowedTypes({{F32, F32, F32}, {BF16, BF16, F32}, {S8, S8, S32}});
 
   PrimitiveType lhs_dtype = conv->operand(0)->shape().element_type();
   PrimitiveType rhs_dtype = conv->operand(1)->shape().element_type();
@@ -324,14 +322,6 @@ bool IsConvolutionOpSupportedByYnn(const HloInstruction* instr) {
 
   // Only support 2D convolution.
   if (window.dimensions_size() != 2) {
-    return false;
-  }
-
-  // Only VALID padding for now.
-  if ((window.dimensions(0).padding_low() != 0) ||
-      (window.dimensions(0).padding_high() != 0) ||
-      (window.dimensions(1).padding_low() != 0) ||
-      (window.dimensions(1).padding_high() != 0)) {
     return false;
   }
 
