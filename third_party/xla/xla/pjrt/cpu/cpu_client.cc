@@ -1276,7 +1276,7 @@ static absl::StatusOr<BufferInfo> MemoryForAllocation(
   } else if (allocation.is_constant() &&
              allocation.index() < constants.size()) {
     se::DeviceAddressBase constant =
-        constants[allocation.index()].AsDeviceMemoryBase();
+        constants[allocation.index()].AsDeviceAddress();
     buffer_info.buffer = CpuDeviceMemory::CreateConstantMemory(
         constant.opaque(), constant.size());
     buffer_info.owns_buffer = false;
@@ -1885,7 +1885,7 @@ absl::StatusOr<PjRtLoadedExecutable::Result> PjRtCpuExecutable::ExecuteHelper(
   }
 
   if (fill_future) {
-    auto [promise, future] = Future<>::MakePromise();
+    auto [promise, future] = MakePromise<>();
     returned_future_can_be_set_event.AndThen(
         [execute_event = std::move(execute_event),
          promise = std::move(promise)]() mutable {
