@@ -1748,25 +1748,11 @@ PartitionedHlo PartitionedHlo::ReshardWithAllToAll(
   VLOG(5) << "Target ata shape: " << reshape->shape().ToString();
 
   HloInstruction* all_to_all = nullptr;
-  // Try to generate replica groups in compressed format.
-  std::optional<IotaReplicaGroupList> groups =
-      GetIotaPartitionGroupsAcrossTargetDims(temp_target, {target_dim},
-                                             {group_size});
-  if (groups.has_value()) {
-    // After the reshape, it is guaranteed to have at least 3 dimensions.
-    all_to_all = state_.collective_ops_creator.create_all_to_all(
-        state_.b, {reshape}, groups.value(), (*state_.next_channel_id)++,
-        target_dim);
-  } else {
-    VLOG(5) << "Falling back to creating all-to-all with replica groups V1 "
-               "(list of vectors).";
-    // The order of ids in the group must follow the temp_target sharding.
-    CollectiveDeviceList groups = GetPartitionGroupsAcrossTargetDims(
-        temp_target, {target_dim}, {group_size});
-    // After the reshape, it is guaranteed to have at least 3 dimensions.
-    all_to_all = state_.collective_ops_creator.create_all_to_all(
-        state_.b, {reshape}, groups, (*state_.next_channel_id)++, target_dim);
-  }
+  std::unique_ptr<CollectiveDeviceListBase> groups =
+      GetPartitionGroupsAcrossTargetDims(temp_target, {target_dim},
+                                         {group_size});
+  all_to_all = state_.collective_ops_creator.create_all_to_all(
+      state_.b, {reshape}, *groups, (*state_.next_channel_id)++, target_dim);
   CHECK_NE(all_to_all, nullptr);
 
   // Reorder the split dimension of the reshape to be located in front of the
@@ -1933,21 +1919,12 @@ PartitionedHlo PartitionedHlo::TryMultipleSourceTargetDims(
       sharding(), eligible_source_dims, eligible_target_dims);
 
   HloInstruction* all_to_all = nullptr;
-  // Try to generate replica groups in compressed format.
-  std::optional<IotaReplicaGroupList> groups =
-      GetIotaPartitionGroupsAcrossTargetDims(temp_target, eligible_target_dims,
-                                             group_sizes);
-  if (groups.has_value()) {
-    all_to_all = state_.collective_ops_creator.create_all_to_all(
-        state_.b, {reshape_1}, *groups, (*state_.next_channel_id)++, 0);
-  } else {
-    VLOG(5) << "Falling back to creating all-to-all with replica groups V1 "
-               "(list of vectors).";
-    CollectiveDeviceList groups = GetPartitionGroupsAcrossTargetDims(
-        temp_target, eligible_target_dims, group_sizes);
-    all_to_all = state_.collective_ops_creator.create_all_to_all(
-        state_.b, {reshape_1}, groups, (*state_.next_channel_id)++, 0);
-  }
+  std::unique_ptr<CollectiveDeviceListBase> groups =
+      GetPartitionGroupsAcrossTargetDims(temp_target, eligible_target_dims,
+                                         group_sizes);
+  all_to_all = state_.collective_ops_creator.create_all_to_all(
+      state_.b, {reshape_1}, *groups, (*state_.next_channel_id)++, 0);
+
   // Step 3. Split sharding axes to multiple dimensions
   // 1. reshape_2 (8,16,8,16,8) -> (2,4,16,8,16,8)
   // 2. transpose_1 (2,4,16,8,16,8) -> (16,4,8,2,16,8) with permutation_1
@@ -5652,32 +5629,29 @@ absl::StatusOr<bool> SpmdPartitioner::RunImpl(
   }
 
   if (options_.allow_module_signature_change) {
-    // Inherit the layout from the old global shape to the new local shape. If
-    // the new local shape differs from the old global shape, update the layout.
-    // Otherwise, do not update the pre-set layout in the old global shape.
-    auto update_layout = [&](Shape* new_local_shape,
-                             const Shape& old_global_shape) {
-      TF_RETURN_IF_ERROR(LayoutUtil::CopyLayoutBetweenShapes(old_global_shape,
-                                                             new_local_shape));
-      ShapeUtil::ForEachMutableSubshape(
-          new_local_shape, [&](Shape* subshape, const xla::ShapeIndex& index) {
-            if (subshape->IsArray() && subshape->has_layout() &&
-                !Shape::Equal().IgnoreLayout()(
-                    *subshape,
-                    ShapeUtil::GetSubshape(old_global_shape, index))) {
-              UpdateLayout(subshape);
-            }
-          });
-      return absl::OkStatus();
+    const ComputationLayout& old_entry_layout =
+        module->entry_computation_layout();
+    // For the cases where we update the shape, also fix up some bad tiling in
+    // entry computation layout.
+    auto update_shape = [this](Shape* subshape, const xla::ShapeIndex&) {
+      if (subshape->IsArray() && subshape->has_layout()) {
+        UpdateLayout(subshape);
+      }
     };
+    // Shapes can change but the layout should still remain the same.
+    // If the shapes do not change, we shouldn't change the layout if pre-set.
     for (int64_t i = 0; i < new_program_shape.parameters_size(); ++i) {
-      TF_RETURN_IF_ERROR(
-          update_layout(new_program_shape.mutable_parameters(i),
-                        module->entry_computation_layout().parameter_shape(i)));
+      TF_RETURN_IF_ERROR(LayoutUtil::CopyLayoutBetweenShapes(
+          old_entry_layout.parameter_shape(i),
+          new_program_shape.mutable_parameters(i)));
+      ShapeUtil::ForEachMutableSubshape(new_program_shape.mutable_parameters(i),
+                                        update_shape);
     }
-    TF_RETURN_IF_ERROR(
-        update_layout(new_program_shape.mutable_result(),
-                      module->entry_computation_layout().result_shape()));
+
+    TF_RETURN_IF_ERROR(LayoutUtil::CopyLayoutBetweenShapes(
+        old_entry_layout.result_shape(), new_program_shape.mutable_result()));
+    ShapeUtil::ForEachMutableSubshape(new_program_shape.mutable_result(),
+                                      update_shape);
 
     HloModuleConfig config = module->config();
     *config.mutable_entry_computation_layout() =

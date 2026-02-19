@@ -49,6 +49,12 @@ limitations under the License.
 namespace xla {
 namespace {
 
+// Returns the absolute value of n as a uint64_t. This is safe for
+// n = std::numeric_limits<int64_t>::min().
+uint64_t SafeAbs(int64_t n) {
+  return n < 0 ? -static_cast<uint64_t>(n) : static_cast<uint64_t>(n);
+}
+
 // Returns {BASE, COEFF}, where expr is equivalent to BASE * COEFF.
 std::pair<SymbolicExpr, int64_t> GetBaseAndCoeff(SymbolicExpr expr) {
   if (expr.GetType() == SymbolicExprType::kMul) {
@@ -408,6 +414,48 @@ SymbolicExpr CanonicalizeMod(SymbolicExpr lhs, SymbolicExpr rhs) {
   return (lhs - product).Canonicalize();
 }
 
+uint64_t GetLargestKnownDivisor(SymbolicExpr expr) {
+  uint64_t lhs_largest = 1;
+  uint64_t rhs_largest = 1;
+  if (expr.IsBinaryOp()) {
+    lhs_largest = GetLargestKnownDivisor(expr.GetLHS());
+    rhs_largest = GetLargestKnownDivisor(expr.GetRHS());
+  }
+  switch (expr.GetType()) {
+    case SymbolicExprType::kVariable:
+      return 1;
+    case SymbolicExprType::kConstant:
+      return SafeAbs(expr.GetValue());
+    case SymbolicExprType::kAdd:
+    case SymbolicExprType::kMod:
+    case SymbolicExprType::kMin:
+    case SymbolicExprType::kMax:
+      // This is not necessarily correct. For example, (x + 2*x) is clearly
+      // multiple of 3. But this can be solved by canonicalizing the expression
+      // first.
+      return std::gcd(lhs_largest, rhs_largest);
+    case SymbolicExprType::kMul:
+      return lhs_largest * rhs_largest;
+    case SymbolicExprType::kFloorDiv:
+    case SymbolicExprType::kCeilDiv: {
+      SymbolicExpr rhs = expr.GetRHS();
+      if (rhs.GetType() == SymbolicExprType::kConstant) {
+        int64_t divisor = rhs.GetValue();
+        if (divisor != 0) {
+          uint64_t abs_divisor = SafeAbs(divisor);
+          if (lhs_largest % abs_divisor == 0) {
+            return lhs_largest / abs_divisor;
+          }
+        }
+      }
+      return 1;
+    }
+    default:
+      LOG(FATAL) << "Unsupported op_type in GetLargestKnownDivisor: "
+                 << GetBinaryOpString(expr.GetType());
+  }
+}
+
 }  // namespace
 
 class SymbolicExprStorage : public mlir::StorageUniquer::BaseStorage {
@@ -587,6 +635,11 @@ SymbolicExpr SymbolicExpr::ReplaceVariables(
   }
 }
 
+SymbolicExpr SymbolicExpr::ReplaceDims(
+    absl::Span<const SymbolicExpr> dim_replacements) const {
+  return ReplaceVariables(dim_replacements);
+}
+
 SymbolicExpr SymbolicExpr::ReplaceSymbols(
     absl::Span<const SymbolicExpr> sym_replacements, int64_t num_dims) const {
   llvm::SmallVector<SymbolicExpr> dim_replacements;
@@ -732,6 +785,10 @@ SymbolicExpr SymbolicExpr::operator+(SymbolicExpr other) const {
   return BasicAddSimplify(*this, other);
 }
 
+SymbolicExpr operator+(int64_t lhs, SymbolicExpr rhs) {
+  return CreateSymbolicConstant(lhs, rhs.GetContext()) + rhs;
+}
+
 SymbolicExpr SymbolicExpr::operator-() const {
   return (*this * CreateSymbolicConstant(-1, GetContext())).Canonicalize();
 }
@@ -747,6 +804,10 @@ SymbolicExpr SymbolicExpr::operator*(SymbolicExpr other) const {
   // TODO(b/433693782): We should use our own canonicalization here instead of
   // relying on a similar one to AffineMap so tests do not fail.
   return BasicMulSimplify(*this, other);
+}
+
+SymbolicExpr operator*(int64_t lhs, SymbolicExpr rhs) {
+  return CreateSymbolicConstant(lhs, rhs.GetContext()) * rhs;
 }
 
 SymbolicExpr SymbolicExpr::operator%(int64_t v) const {
@@ -852,6 +913,11 @@ llvm::SmallVector<SymbolicExpr> CreateSymbolicConstantExprs(
     exprs.push_back(CreateSymbolicConstant(constant, context));
   }
   return exprs;
+}
+
+bool SymbolicExpr::IsMultipleOf(int64_t factor) const {
+  CHECK_NE(factor, 0);
+  return GetLargestKnownDivisor(*this) % SafeAbs(factor) == 0;
 }
 
 void SymbolicExpr::Walk(

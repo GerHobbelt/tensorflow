@@ -26,7 +26,9 @@ limitations under the License.
 #include "xla/ffi/api/c_api_internal.h"  // IWYU pragma: keep
 #include "xla/ffi/execution_context.h"
 #include "xla/ffi/execution_state.h"
+#include "xla/ffi/ffi_registry.h"
 #include "xla/ffi/ffi_structs.h"
+#include "xla/ffi/type_registry.h"
 #include "xla/hlo/ir/hlo_computation.h"
 #include "xla/stream_executor/device_description.h"
 #include "xla/tsl/concurrency/async_value.h"
@@ -55,6 +57,14 @@ static XLA_FFI_Future* XLA_FFI_INTERNAL_Future_Forward(void* async_value) {
 
   return new XLA_FFI_Future{
       tsl::AsyncValueRef<tsl::Chain>(tsl::TakeRef(tsl_async_value))};
+}
+
+static void* XLA_FFI_Internal_HandlerRegistrationMap_Get() {
+  return &internal::StaticHandlerRegistrationMap();
+}
+
+static void* XLA_FFI_Internal_TypeRegistrationMap_Get() {
+  return &internal::StaticTypeRegistrationMap();
 }
 
 static int32_t XLA_FFI_INTERNAL_DeviceOrdinal_Get(
@@ -96,7 +106,7 @@ static XLA_FFI_Error* XLA_FFI_INTERNAL_IntraOpThreadPool_Get(
 
   // For GPU backend we don't have intra-op thread pool, but we didn't promise
   // to return one, so instead of an error we return a nullptr thread pool.
-  if (auto* gpu = std::get_if<XLA_FFI_ExecutionContext::GpuContext>(
+  if (auto* _ = std::get_if<XLA_FFI_ExecutionContext::GpuContext>(
           &ctx->backend_context)) {
     return nullptr;
   }
@@ -214,6 +224,8 @@ const XLA_FFI_InternalApi* GetInternalApi() {
       // Generic XLA APIs available on all XLA backends.
       XLA_FFI_INTERNAL_Error_Forward,
       XLA_FFI_INTERNAL_Future_Forward,
+      XLA_FFI_Internal_HandlerRegistrationMap_Get,
+      XLA_FFI_Internal_TypeRegistrationMap_Get,
       XLA_FFI_INTERNAL_DeviceOrdinal_Get,
       XLA_FFI_INTERNAL_RunId_Get,
       XLA_FFI_INTERNAL_CalledComputation_Get,

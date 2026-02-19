@@ -349,10 +349,11 @@ tsl::Future<Autotuner::Config> Autotuner::GetConfig(HloInstruction* instr) {
   }
 
   VLOG(1) << "Autotuning the HLO instruction to find best config.";
-  return TuneBestConfig(instr).Map([&, instr](Autotuner::Config best_config) {
-    Insert(instr, best_config);
-    return best_config;
-  });
+  return TuneBestConfig(instr).Map(
+      [&, instr](Autotuner::Config best_config) -> absl::StatusOr<Config> {
+        RETURN_IF_ERROR(Insert(instr, best_config));
+        return best_config;
+      });
 }
 
 absl::Status Autotuner::IsValidExecutable(
@@ -456,7 +457,7 @@ std::optional<Autotuner::Config> Autotuner::LookUp(
     if (cached_config.has_value()) {
       VLOG(1) << "Found cached config for HLO: " << instr->ToString();
       for (auto& codegen_backend : codegen_backends_) {
-        if (codegen_backend->name() == cached_config->codegen_backend_name) {
+        if (codegen_backend->backend() == cached_config->codegen_backend) {
           auto backend_config = std::make_unique<google::protobuf::Any>(
               cached_config->backend_config);
           return Config{codegen_backend.get(), std::move(backend_config)};
@@ -464,19 +465,21 @@ std::optional<Autotuner::Config> Autotuner::LookUp(
       }
       LOG(WARNING) << "Cached config for HLO: " << instr->ToString()
                    << " has unsupported backend "
-                   << cached_config->codegen_backend_name;
+                   << cached_config->codegen_backend;
     }
   }
   return std::nullopt;
 }
 
-void Autotuner::Insert(const HloInstruction* instr, Autotuner::Config& config) {
+absl::Status Autotuner::Insert(const HloInstruction* instr,
+                               Autotuner::Config& config) {
   if (cache_) {
     AutotunerCacheInterface::Config cached_config;
-    cached_config.codegen_backend_name = config.codegen_backend->name();
+    cached_config.codegen_backend = config.codegen_backend->backend();
     cached_config.backend_config = *config.backend_config;
-    CHECK_OK(cache_->Insert(instr, cached_config));
+    return cache_->Insert(instr, cached_config);
   }
+  return absl::OkStatus();
 }
 
 absl::StatusOr<std::vector<Autotuner::Config>> Autotuner::GetSupportedConfigs(
@@ -557,7 +560,7 @@ absl::StatusOr<std::vector<Autotuner::ConfigResult>> Autotuner::ProfileAll(
 
   absl::MutexLock lock(profiler_m_);
 
-  TF_ASSIGN_OR_RETURN(
+  ASSIGN_OR_RETURN(
       std::unique_ptr<InputBuffers> input_buffers,
       profiler_->CreateInputBuffers(candidates[0].executable.get()));
 
