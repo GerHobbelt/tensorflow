@@ -28,9 +28,7 @@ limitations under the License.
 #include "absl/types/span.h"
 #include "xla/backends/gpu/runtime/print_buffer_contents.h"
 #include "xla/backends/gpu/runtime/thunk.h"
-#include "xla/backends/gpu/runtime/thunk_id.h"
 #include "xla/codegen/emitters/kernel_arguments.h"
-#include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/runtime/buffer_use.h"
 #include "xla/service/buffer_assignment.h"
 #include "xla/service/gpu/kernels/custom_kernel.h"
@@ -44,13 +42,12 @@ limitations under the License.
 namespace xla {
 namespace gpu {
 
-
 CustomKernelThunk::CustomKernelThunk(
-    const HloInstruction* instr, CustomKernel custom_kernel,
-    const emitters::KernelArguments& kernel_arguments, ThunkId thunk_id)
-    : Thunk(Kind::kCustomKernel,
-            Thunk::ThunkInfo::WithProfileAnnotation(instr, thunk_id)),
+    Thunk::ThunkInfo thunk_info, CustomKernel custom_kernel,
+    const emitters::KernelArguments& kernel_arguments)
+    : Thunk(Kind::kCustomKernel, std::move(thunk_info)),
       args_(kernel_arguments.GetArgumentBufferSlices()),
+      args_shape_(kernel_arguments.GetArgumentBufferShapes()),
       written_(kernel_arguments.GetArgumentOutputFlags()),
       custom_kernel_(std::move(custom_kernel)) {}
 
@@ -116,9 +113,9 @@ Thunk::BufferUses CustomKernelThunk::buffer_uses() const {
     // We assume that any buffer is either an input or an output of the
     // kernel, and inout buffers are represented as 2 separate arguments.
     if (written_[i]) {
-      buffers.push_back(BufferUse::Write(args_[i]));
+      buffers.push_back(BufferUse::Write(args_[i], args_shape_[i]));
     } else {
-      buffers.push_back(BufferUse::Read(args_[i]));
+      buffers.push_back(BufferUse::Read(args_[i], args_shape_[i]));
     }
   }
   return buffers;

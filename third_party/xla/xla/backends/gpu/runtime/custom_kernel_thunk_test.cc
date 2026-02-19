@@ -18,10 +18,7 @@ limitations under the License.
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include "xla/backends/gpu/runtime/thunk.h"
-#include "xla/backends/gpu/runtime/thunk_id.h"
 #include "xla/codegen/emitters/kernel_arguments.h"
-#include "xla/hlo/ir/hlo_instruction.h"
-#include "xla/literal.h"
 #include "xla/runtime/buffer_use.h"
 #include "xla/service/buffer_assignment.h"
 #include "xla/service/gpu/kernels/custom_kernel.h"
@@ -33,6 +30,7 @@ namespace xla::gpu {
 namespace {
 
 TEST(CustomKernelThunkTest, BufferUsesReturnsCorrectBuffers) {
+  Shape arg_shape = ShapeUtil::MakeShape(F32, {512});
   CustomKernel kernel(
       /*name=*/"",
       se::KernelLoaderSpec::CreateCudaPtxInMemorySpec(
@@ -41,18 +39,18 @@ TEST(CustomKernelThunkTest, BufferUsesReturnsCorrectBuffers) {
   BufferAllocation alloc(/*index=*/0, /*size=*/1024, /*color=*/0);
   BufferAllocation::Slice slice0(&alloc, /*offset=*/0, /*size=*/512);
   BufferAllocation::Slice slice1(&alloc, /*offset=*/512, /*size=*/512);
-  emitters::KernelArgument arg0(ShapeUtil::MakeShape(F32, {512}), slice0);
-  emitters::KernelArgument arg1(ShapeUtil::MakeShape(F32, {512}), slice1);
+  emitters::KernelArgument arg0(arg_shape, slice0);
+  emitters::KernelArgument arg1(arg_shape, slice1);
   arg0.set_written(false);
   arg1.set_written(true);
   emitters::KernelArguments kernel_arguments({arg0, arg1});
-  auto hlo = HloInstruction::CreateConstant(Literal());
-  CustomKernelThunk thunk(hlo.get(), kernel, kernel_arguments, ThunkId{0});
+  CustomKernelThunk thunk(Thunk::ThunkInfo{}, kernel, kernel_arguments);
 
   Thunk::BufferUses buffers = thunk.buffer_uses();
 
-  ASSERT_THAT(buffers, testing::UnorderedElementsAre(BufferUse::Read(slice0),
-                                                     BufferUse::Write(slice1)));
+  ASSERT_THAT(buffers, testing::UnorderedElementsAre(
+                           BufferUse::Read(slice0, arg_shape),
+                           BufferUse::Write(slice1, arg_shape)));
 }
 
 TEST(CustomKernelThunkTest, BufferUsesReturnsBuffersInConsistentOrder) {
@@ -69,8 +67,7 @@ TEST(CustomKernelThunkTest, BufferUsesReturnsBuffersInConsistentOrder) {
   arg0.set_written(false);
   arg1.set_written(true);
   emitters::KernelArguments kernel_arguments({arg0, arg1});
-  auto hlo = HloInstruction::CreateConstant(Literal());
-  CustomKernelThunk thunk(hlo.get(), kernel, kernel_arguments, ThunkId{0});
+  CustomKernelThunk thunk(Thunk::ThunkInfo{}, kernel, kernel_arguments);
 
   Thunk::BufferUses buffers1 = thunk.buffer_uses();
   Thunk::BufferUses buffers2 = thunk.buffer_uses();
