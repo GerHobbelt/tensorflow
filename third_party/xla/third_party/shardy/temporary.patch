@@ -1,71 +1,114 @@
-diff --git a/docs/mpmd/mpmd_sharding_propagation_passes.md b/docs/mpmd/mpmd_sharding_propagation_passes.md
-index a3b51cc..3b40773 100644
---- a/docs/mpmd/mpmd_sharding_propagation_passes.md
-+++ b/docs/mpmd/mpmd_sharding_propagation_passes.md
-@@ -57,10 +57,3 @@ This pass is only applied to MPMD functions in global view and with a
- homogeneous topology.
- 
- Precondition: all shardings are specified as op attributes and not in types.
--
--### `-mpmd-simplify-program`
--
--_Removes redundant arg/results from fragments._
--
--Simplifies a fragment or loop, its operands and results, and their
--corresponding block arguments and return values.
-diff --git a/shardy/dialect/sdy/transforms/export/explicit_reshards_util.cc b/shardy/dialect/sdy/transforms/export/explicit_reshards_util.cc
-index 862a2da..be8f02c 100644
---- a/shardy/dialect/sdy/transforms/export/explicit_reshards_util.cc
-+++ b/shardy/dialect/sdy/transforms/export/explicit_reshards_util.cc
-@@ -433,9 +433,11 @@ class FactorAxesCandidateBag {
-         for (int64_t index = 1; index < factorIndices.size(); index++) {
-           int64_t factorIndex = factorIndices[index];
-           int64_t dependsOn = factorIndices[index - 1];
--          factorDependenciesMap
--              .try_emplace(factorIndex, shardingRule.getNumFactors())
--              .first->second.set(dependsOn);
-+          if (!factorDependenciesMap.contains(factorIndex)) {
-+            factorDependenciesMap.try_emplace(factorIndex,
-+                                              shardingRule.getNumFactors());
-+          }
-+          factorDependenciesMap[factorIndex].set(dependsOn);
-         }
-       }
-     }
-diff --git a/shardy/dialect/sdy/transforms/export/insert_explicit_reshards.cc b/shardy/dialect/sdy/transforms/export/insert_explicit_reshards.cc
-index dcec262..b1d7585 100644
---- a/shardy/dialect/sdy/transforms/export/insert_explicit_reshards.cc
-+++ b/shardy/dialect/sdy/transforms/export/insert_explicit_reshards.cc
-@@ -77,7 +77,7 @@ void insertExplicitReshardsToTargetSharding(OpOperand& opOperand,
-         rewriter, operand.getLoc(), operand,
-         targetSharding
-             ? targetSharding
--            // Since operand and target shardings are not equivalent and
-+            // Since opearand and target shardings are not equivalent and
-             // `targetSharding` is empty, `operandSharding` is guaranteed to be
-             // nonempty.
-             : TensorShardingAttr::getFullyClosedLike(operandSharding));
-@@ -327,7 +327,7 @@ void insertAllReduceOnOpIfUnreducedToReplicated(
-       return sharding && !sharding.getUnreducedAxes().empty();
-     };
-     SDY_CHECK(!llvm::any_of(op->getOpOperands(), operandHasUnreducedAxes))
--        << "Some operands have unreduced axes but the operation has no "
-+        << "Some operands has unreduced axes but the operation has no "
-           "results. ";
-     return;
-   }
+diff --git a/third_party/llvm/generated.patch b/third_party/llvm/generated.patch
+index 509398d..2856e5f 100644
+--- a/third_party/llvm/generated.patch
++++ b/third_party/llvm/generated.patch
+@@ -1 +1,34 @@
+ Auto generated patch. Do not edit or delete it, even if empty.
++diff -ruN --strip-trailing-cr a/mlir/test/Target/SPIRV/function-decorations-asserts.mlir b/mlir/test/Target/SPIRV/function-decorations-asserts.mlir
++--- a/mlir/test/Target/SPIRV/function-decorations-asserts.mlir
+++++ b/mlir/test/Target/SPIRV/function-decorations-asserts.mlir
++@@ -0,0 +1,20 @@
+++// REQUIRES: asserts
+++// RUN: mlir-translate --no-implicit-module --test-spirv-roundtrip --split-input-file --debug %s | FileCheck %s
+++
+++spirv.module Logical GLSL450 requires #spirv.vce<v1.0, [Shader, Linkage], []> {
+++    spirv.func @linkage_attr_test_kernel()  "DontInline"  attributes {}  {
+++        %uchar_0 = spirv.Constant 0 : i8
+++        %ushort_1 = spirv.Constant 1 : i16
+++        %uint_0 = spirv.Constant 0 : i32
+++        spirv.FunctionCall @outside.func.with.linkage(%uchar_0):(i8) -> ()
+++        spirv.Return
+++    }
+++    // CHECK: linkage_attributes = #spirv.linkage_attributes<linkage_name = "outside.func", linkage_type = <Import>>
+++    spirv.func @outside.func.with.linkage(%arg0 : i8) -> () "Pure" attributes {
+++      linkage_attributes=#spirv.linkage_attributes<
+++        linkage_name="outside.func",
+++        linkage_type=<Import>
+++      >
+++    }
+++    spirv.func @inside.func() -> () "Pure" attributes {} {spirv.Return}
+++}
++diff -ruN --strip-trailing-cr a/mlir/test/Target/SPIRV/function-decorations.mlir b/mlir/test/Target/SPIRV/function-decorations.mlir
++--- a/mlir/test/Target/SPIRV/function-decorations.mlir
+++++ b/mlir/test/Target/SPIRV/function-decorations.mlir
++@@ -1,5 +1,4 @@
++ // RUN: mlir-translate --no-implicit-module --test-spirv-roundtrip --split-input-file %s | FileCheck %s
++-// RUN: mlir-translate --no-implicit-module --test-spirv-roundtrip --split-input-file --debug %s | FileCheck %s
++ 
++ spirv.module Logical GLSL450 requires #spirv.vce<v1.0, [Shader, Linkage], []> {
++     spirv.func @linkage_attr_test_kernel()  "DontInline"  attributes {}  {
 diff --git a/third_party/llvm/workspace.bzl b/third_party/llvm/workspace.bzl
-index ed562d4..ba4c1a2 100644
+index 622428b..b1675f1 100644
 --- a/third_party/llvm/workspace.bzl
 +++ b/third_party/llvm/workspace.bzl
 @@ -4,8 +4,8 @@ load("//third_party:repo.bzl", "tf_http_archive")
  
  def repo(name):
      """Imports LLVM."""
--    LLVM_COMMIT = "267fa8dd1efce0b79ebcaa804d54542c99918df2"
--    LLVM_SHA256 = "a72180219b02c46a11fa11d7ca3e5c4f57ecaa348162e010e73a59bd26623950"
-+    LLVM_COMMIT = "bfee9db7857757e63b64fb4d411a264690ff711a"
-+    LLVM_SHA256 = "b14cb659a35562d1fccee470d0bba41cf96363e1b576e113a3a795db9ad78e3e"
+-    LLVM_COMMIT = "d5ce81dc8143eed18a7342093b991a63b025e2d9"
+-    LLVM_SHA256 = "07efbd552b4539a0b52201cfe73767a4265720789facdfa0d73bfeeb78ea19d3"
++    LLVM_COMMIT = "32de3b9ef9e7e8debc14416e968456ca13b48bea"
++    LLVM_SHA256 = "e048b05e1fb9366e224ea3c06f8473714114039bfad00e81db4ecb6409f23efa"
  
      tf_http_archive(
          name = name,
+diff --git a/third_party/stablehlo/temporary.patch b/third_party/stablehlo/temporary.patch
+index f2e3e59..473baf0 100755
+--- a/third_party/stablehlo/temporary.patch
++++ b/third_party/stablehlo/temporary.patch
+@@ -904,36 +904,6 @@ diff --ruN a/stablehlo/stablehlo/tests/transforms/stablehlo_aggressive_simplific
+  // -----
+  
+  ////////
+-diff --ruN a/stablehlo/stablehlo/tests/transforms/stablehlo_refine_shapes.mlir b/stablehlo/stablehlo/tests/transforms/stablehlo_refine_shapes.mlir
+---- stablehlo/stablehlo/tests/transforms/stablehlo_refine_shapes.mlir
+-+++ stablehlo/stablehlo/tests/transforms/stablehlo_refine_shapes.mlir
+-@@ -752,7 +752,7 @@
+-     %2 = call @refine_call_callee(%arg0_different_i32, %1) : (tensor<i32>, tensor<?xf32>) -> tensor<?xf32>
+-     return %2 : tensor<?xf32>
+-   }
+--  // expected-error@+1{{'func.func' op refined with invompatible refinement keys}}
+-+  // expected-error@+1{{'func.func' op refined with incompatible refinement keys}}
+-   func.func @refine_call_callee(%arg0: tensor<i32>, %arg1: tensor<?xf32>) -> tensor<?xf32> {
+-     return %arg1 : tensor<?xf32>
+-   }
+-@@ -770,7 +770,7 @@
+-     %2 = call @refine_call_callee(%arg0_different, %1) : (tensor<i32>, tensor<?xf32>) -> tensor<?xf32>
+-     return %2 : tensor<?xf32>
+-   }
+--  // expected-error@+1{{'func.func' op refined with invompatible refinement keys}}
+-+  // expected-error@+1{{'func.func' op refined with incompatible refinement keys}}
+-   func.func @refine_call_callee(%arg0: tensor<i32>, %arg1: tensor<?xf32>) -> tensor<?xf32> {
+-     return %arg1 : tensor<?xf32>
+-   }
+-@@ -789,7 +789,7 @@
+-     %4 = call @refine_call_callee(%arg0_new, %3) : (tensor<i32>, tensor<?xf32>) -> tensor<?xf32>
+-     return %4 : tensor<?xf32>
+-   }
+--  // expected-error@+1{{'func.func' op refined with invompatible refinement keys}}
+-+  // expected-error@+1{{'func.func' op refined with incompatible refinement keys}}
+-   func.func @refine_call_callee(%arg0: tensor<i32>, %arg1: tensor<?xf32>) -> tensor<?xf32> {
+-     return %arg1 : tensor<?xf32>
+-   }
+ diff --ruN a/stablehlo/stablehlo/transforms/ChloLegalizeToStablehlo.cpp b/stablehlo/stablehlo/transforms/ChloLegalizeToStablehlo.cpp
+ --- stablehlo/stablehlo/transforms/ChloLegalizeToStablehlo.cpp
+ +++ stablehlo/stablehlo/transforms/ChloLegalizeToStablehlo.cpp
+@@ -1461,18 +1431,6 @@ diff --ruN a/stablehlo/stablehlo/transforms/ChloLegalizeToStablehlo.cpp b/stable
+    populateChloBroadcastingPatterns(context, patterns);
+    populateChloDecompositionPatterns(context, patterns);
+  }
+-diff --ruN a/stablehlo/stablehlo/transforms/StablehloRefineShapes.cpp b/stablehlo/stablehlo/transforms/StablehloRefineShapes.cpp
+---- stablehlo/stablehlo/transforms/StablehloRefineShapes.cpp
+-+++ stablehlo/stablehlo/transforms/StablehloRefineShapes.cpp
+-@@ -461,7 +461,7 @@
+-   LogicalResult emitDifferentRefinementContextError(func::FuncOp func,
+-                                                     RefinementKey key,
+-                                                     RefinementKey prevKey) {
+--    return func.emitOpError() << "refined with invompatible refinement keys:"
+-+    return func.emitOpError() << "refined with incompatible refinement keys:"
+-                               << "\n  curr=" << key.toString()
+-                               << "\n  prev=" << prevKey.toString();
+-   }
+ diff --ruN a/stablehlo/stablehlo/transforms/optimization/Passes.td b/stablehlo/stablehlo/transforms/optimization/Passes.td
+ --- stablehlo/stablehlo/transforms/optimization/Passes.td
+ +++ stablehlo/stablehlo/transforms/optimization/Passes.td
