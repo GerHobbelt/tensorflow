@@ -63,11 +63,11 @@ cc_library(
 tf_proto_library(
     name = "custom_kernel_proto",
     srcs = ["custom_kernel.proto"],
-    protodeps = [
+    visibility = [":friends"],
+    deps = [
         "//xla/stream_executor:kernel_spec_proto",
         "//xla/stream_executor:launch_dim_proto",
     ],
-    visibility = [":friends"],
 )
 
 cc_library(
@@ -149,7 +149,11 @@ xla_test(
     name = "cutlass_gemm_fusion_test",
     srcs = ["cutlass_gemm_fusion_test.cc"],
     backends = ["gpu"],
-    tags = ["cuda-only"],
+    tags = [
+        "cuda-only",
+        "pjrt_migration_candidate",
+    ],
+    use_legacy_runtime = True,
     deps = [
         ":custom_kernel_fusion_pattern",
         ":cutlass_gemm_custom_kernel",
