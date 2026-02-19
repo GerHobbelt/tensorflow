@@ -1,4 +1,4 @@
-/* Copyright 2022 The OpenXLA Authors.
+/* Copyright 2026 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,16 +13,25 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include <gtest/gtest.h>
-#include "absl/strings/string_view.h"
-#include "xla/python/ifrt/test_util.h"
+#ifndef XLA_RUNTIME_PROCESS_ID_H_
+#define XLA_RUNTIME_PROCESS_ID_H_
 
-int main(int argc, char** argv) {
-  // This implementation does not export executables in the standard format yet.
-  static constexpr absl::string_view kFilter =
-      "-ExecutableTest.ExecutableSerialization";
-  xla::ifrt::test_util::SetTestFilterIfNotUserSpecified(kFilter);
+#include <cstdint>
 
-  testing::InitGoogleTest(&argc, argv);
-  return RUN_ALL_TESTS();
+#include "xla/tsl/lib/gtl/int_type.h"
+
+namespace xla {
+
+// Strongly-typed integer type for identifying processes in a distributed
+// execution. Processes can belong to the same physical host, or can be
+// distributed over multiple nodes.
+TSL_LIB_GTL_DEFINE_INT_TYPE(ProcessId, int64_t);
+
+template <typename Sink>
+void AbslStringify(Sink& sink, ProcessId id) {
+  absl::Format(&sink, "%d", id.value());
 }
+
+}  // namespace xla
+
+#endif  // XLA_RUNTIME_PROCESS_ID_H_

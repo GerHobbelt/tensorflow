@@ -53,6 +53,7 @@ limitations under the License.
 #include "xla/python/ifrt/device_list.h"
 #include "xla/python/ifrt/dtype.h"
 #include "xla/python/ifrt/executable.h"
+#include "xla/python/ifrt/layout.h"
 #include "xla/python/ifrt/memory.h"
 #include "xla/python/ifrt/remap_plan.h"
 #include "xla/python/ifrt/shape.h"
@@ -129,6 +130,8 @@ class PjRtCompatibleClient
 class PjRtClient final
     : public llvm::RTTIExtends<PjRtClient, PjRtCompatibleClient> {
  public:
+  static constexpr absl::string_view kRuntimeType = "pjrt_ifrt";
+
   struct CreateOptions {
     std::shared_ptr<xla::PjRtClient> pjrt_client;
 
@@ -222,8 +225,10 @@ class PjRtClient final
   absl::StatusOr<ArrayRef> MakeArrayFromHostBuffer(
       const void* data, DType dtype, Shape shape,
       std::optional<absl::Span<const int64_t>> byte_strides,
-      ShardingRef sharding, HostBufferSemantics semantics,
+      ShardingRef sharding, LayoutRef layout, HostBufferSemantics semantics,
       std::function<void()> on_done_with_host_buffer) override;
+  // Expose the base class's `MakeArrayFromHostBuffer` overloads.
+  using xla::ifrt::Client::MakeArrayFromHostBuffer;
 
   absl::StatusOr<std::vector<ArrayRef>> MakeArraysFromHostBufferShards(
       absl::Span<MakeArraysFromHostBufferShardsSpec> specs,
@@ -260,7 +265,7 @@ class PjRtClient final
       xla::ifrt::LoadedExecutable::CancellationHandle cancellation_handle,
       absl::Status error) override {}
 
-  absl::string_view runtime_type() const override { return "pjrt_ifrt"; }
+  absl::string_view runtime_type() const override { return kRuntimeType; }
 
   absl::string_view platform_name() const override {
     DCHECK(this);
