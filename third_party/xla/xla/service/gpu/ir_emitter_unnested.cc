@@ -56,6 +56,7 @@ limitations under the License.
 #include "llvm/IR/Module.h"
 #include "llvm/Linker/Linker.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/TargetParser/Triple.h"
 #include "mlir/AsmParser/AsmParser.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/MemRef/Transforms/Passes.h"
@@ -353,13 +354,14 @@ absl::Status IrEmitterUnnested::EmitPadToStatic(
     const HloCustomCallInstruction* instr) {
   int unroll_factor = 1;
   std::string ir_name = std::string(instr->name());
-
   const Shape& input_shape = instr->operand(0)->shape();
 
   LaunchDimensions launch_dimensions = CalculateLaunchDimensions(
       input_shape, ir_emitter_context_->gpu_device_info(), {unroll_factor});
-  TF_ASSIGN_OR_RETURN(std::vector<llvm_ir::IrArray> ir_arrays,
-                      BuildKernelThunkForNonFusionOp(instr, launch_dimensions));
+  TF_ASSIGN_OR_RETURN(
+      std::vector<llvm_ir::IrArray> ir_arrays,
+      BuildKernelThunkForNonFusionOp(ir_emitter_context_->llvm_module(), instr,
+                                     launch_dimensions));
 
   const llvm_ir::IrArray& source_array = ir_arrays[0];
   const llvm_ir::IrArray& output_array = ir_arrays[1];
@@ -490,8 +492,10 @@ absl::Status IrEmitterUnnested::EmitSliceToDynamic(
       input_shape, ir_emitter_context_->gpu_device_info(), {unroll_factor});
   llvm::Type* index_ty =
       GetIndexTypeForKernel(instr, launch_dimensions.launch_bound(), &b_);
-  TF_ASSIGN_OR_RETURN(std::vector<llvm_ir::IrArray> ir_arrays,
-                      BuildKernelThunkForNonFusionOp(instr, launch_dimensions));
+  TF_ASSIGN_OR_RETURN(
+      std::vector<llvm_ir::IrArray> ir_arrays,
+      BuildKernelThunkForNonFusionOp(ir_emitter_context_->llvm_module(), instr,
+                                     launch_dimensions));
 
   const Shape& data_shape = ShapeUtil::MakeStaticShape(instr->shape());
   TF_RET_CHECK(data_shape.IsArray());
@@ -1186,8 +1190,7 @@ absl::Status IrEmitterUnnested::EmitCustomCallThunk(
             : instr->raw_backend_config_string();
     if (!backend_config_str.empty()) {
       mlir::Attribute attr = mlir::parseAttribute(
-          backend_config_str,
-          ir_emitter_context_->expr_context()->GetMLIRContext());
+          backend_config_str, ir_emitter_context_->mlir_context());
       auto dict = mlir::dyn_cast_or_null<mlir::DictionaryAttr>(attr);
       if (dict == nullptr) {
         return absl::InternalError(
@@ -1420,13 +1423,11 @@ absl::Status IrEmitterUnnested::EmitTopKCustomCall(
 absl::Status IrEmitterUnnested::EmitTritonCustomCall(
     const HloCustomCallInstruction* instr) {
   auto generate = [this, &instr]() -> absl::StatusOr<KernelReuseCache::Entry> {
-    mlir::MLIRContext& mlir_context =
-        *ir_emitter_context_->expr_context()->GetMLIRContext();
+    mlir::MLIRContext& mlir_context = *ir_emitter_context_->mlir_context();
     LoadMlirDialectsForTriton(mlir_context);
     auto call =
         TritonCall::Parse(instr->raw_backend_config_string(), &mlir_context);
-    auto kernel_name =
-        ir_emitter_context_->name_uniquer()->GetUniqueName(call.name);
+    auto kernel_name = GetSanitizedUniqueName(*ir_emitter_context_, call.name);
     VLOG(3) << "Generating: " << kernel_name;
 
     mlir::OwningOpRef<mlir::ModuleOp> triton_module;
@@ -1487,16 +1488,17 @@ absl::Status IrEmitterUnnested::EmitTritonCustomCall(
       llvm::Function* impl_fn =
           ir_emitter_context_->llvm_module()->getFunction(kernel_name);
       TF_RET_CHECK(impl_fn);
-      impl_fn->setName(ir_emitter_context_->name_uniquer()->GetUniqueName(
-          kernel_name + "_impl"));
+      impl_fn->setName(
+          GetSanitizedUniqueName(*ir_emitter_context_, kernel_name + "_impl"));
 
       llvm::IRBuilder builder(ir_emitter_context_->llvm_module()->getContext());
 
       TF_ASSIGN_OR_RETURN(llvm::Function * kernel,
                           BuildKernelPrototypeFromUniqueName(
-                              *ir_emitter_context_, impl_fn->getName().str(),
-                              sanitized_kernel_name, kernel_arguments,
-                              launch_dimensions, &builder));
+                              ir_emitter_context_->llvm_module(),
+                              ir_emitter_context_->gpu_device_info(),
+                              impl_fn->getName().str(), sanitized_kernel_name,
+                              kernel_arguments, launch_dimensions, &builder));
 
       // Move function body into kernel prototype.
       llvm::Function* prototype_func = builder.GetInsertBlock()->getParent();
@@ -1598,7 +1600,7 @@ absl::Status IrEmitterUnnested::EmitFusion(const HloFusionInstruction* instr) {
           /*buffer_assignment=*/
           &ir_emitter_context_->buffer_assignment(),
           /*call_graph=*/*call_graph_),
-      ir_emitter_context_->expr_context());
+      ir_emitter_context_->mlir_context());
   TF_ASSIGN_OR_RETURN(auto result, emitter->Emit(*ir_emitter_context_, *instr));
 
   const ExecutionStreamAssignment& stream_assignment =
@@ -1709,6 +1711,7 @@ absl::Status IrEmitterUnnested::EmitRngGetAndUpdateState(
   // Emit a kernel to increment the global state for Philox RNG
   // algorithm.
   TF_ASSIGN_OR_RETURN(auto ir_arrays, BuildKernelThunkForNonFusionOp(
+                                          ir_emitter_context_->llvm_module(),
                                           instr, LaunchDimensions()));
   llvm::Value* old_state =
       llvm_ir::RngGetAndUpdateState(instr->delta(), module_, &b_);
@@ -1868,7 +1871,8 @@ absl::Status IrEmitterUnnested::EmitSort(const HloSortInstruction* sort) {
                                              : standard_launch_dimensions;
     TF_ASSIGN_OR_RETURN(
         std::vector<llvm_ir::IrArray> ir_arrays,
-        BuildKernelThunkForNonFusionOp(sort, launch_dimensions));
+        BuildKernelThunkForNonFusionOp(ir_emitter_context_->llvm_module(), sort,
+                                       launch_dimensions));
 
     // The first `operand_count()` elements of `ir_arrays` are the input
     // operands and the rest are the output arrays. Inputs are aliases with
@@ -2621,7 +2625,8 @@ absl::Status IrEmitterUnnested::EmitOutfeed(
 
 absl::StatusOr<std::vector<llvm_ir::IrArray>>
 IrEmitterUnnested::BuildKernelThunkForNonFusionOp(
-    const HloInstruction* instr, const LaunchDimensions& launch_dimensions) {
+    llvm::Module* llvm_module, const HloInstruction* instr,
+    const LaunchDimensions& launch_dimensions) {
   std::string suggested_kernel_name(instr->name());
 
   TF_ASSIGN_OR_RETURN(auto kernel_arguments,
@@ -2633,9 +2638,11 @@ IrEmitterUnnested::BuildKernelThunkForNonFusionOp(
 
   TF_ASSIGN_OR_RETURN(
       llvm::Function * kernel,
-      BuildKernelPrototype(*ir_emitter_context_, suggested_kernel_name,
-                           suggested_kernel_name, kernel_arguments,
-                           launch_dimensions, &b_));
+      BuildKernelPrototype(
+          llvm_module, ir_emitter_context_->gpu_device_info(),
+          suggested_kernel_name,
+          GetSanitizedUniqueName(*ir_emitter_context_, suggested_kernel_name),
+          kernel_arguments, launch_dimensions, &b_));
 
   AddThunkToThunkSequence(std::make_unique<KernelThunk>(
       Thunk::ThunkInfo::WithProfileAnnotation(

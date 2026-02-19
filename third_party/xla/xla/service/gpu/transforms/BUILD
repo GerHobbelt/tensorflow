@@ -196,7 +196,6 @@ cc_library(
         "//xla:xla_data_proto_cc",
         "//xla:xla_proto_cc",
         "//xla/backends/gpu/codegen/triton:support",
-        "//xla/hlo/analysis:symbolic_expr",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/pass:hlo_pass",
         "//xla/hlo/utils:hlo_traversal",
@@ -217,6 +216,7 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
         "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:IR",
     ],
 )
 
@@ -1869,7 +1869,6 @@ cc_library(
         "//xla:debug_options_flags",
         "//xla:shape_util",
         "//xla/hlo/analysis:hlo_dfs_reachability",
-        "//xla/hlo/analysis:symbolic_expr",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/pass:hlo_pass",
         "//xla/service:hlo_cost_analysis",
@@ -1890,6 +1889,7 @@ cc_library(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
+        "@llvm-project//mlir:IR",
     ],
 )
 
@@ -1946,7 +1946,6 @@ cc_library(
         "//xla/service/gpu/model:block_level_parameters",
         "//xla/service/gpu/model:triton_emitter_constraints",
         "//xla/stream_executor:device_description",
-        "//xla/tools:hlo_decomposer_lib",
         "//xla/tools:hlo_extractor",
         "//xla/tsl/platform:errors",
         "//xla/tsl/platform:statusor",
@@ -2043,6 +2042,7 @@ cc_library(
         "@com_google_absl//absl/time",
         "@com_google_absl//absl/types:span",
         "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:IR",
     ],
 )
 

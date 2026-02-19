@@ -41,7 +41,6 @@ limitations under the License.
 #include "xla/codegen/emitters/kernel_api_builder.h"
 #include "xla/codegen/emitters/kernel_arguments.h"
 #include "xla/hlo/analysis/indexing_map.h"
-#include "xla/hlo/analysis/symbolic_expr.h"
 #include "xla/runtime/work_dimensions.h"
 #include "xla/service/gpu/ir_emitter_context.h"
 #include "xla/service/gpu/launch_dimensions.h"
@@ -101,11 +100,11 @@ absl::Status AnnotateKernelLaunchDimensions(
 
 IndexingMap KernelFusionInterface::GetDefaultThreadIdIndexingMap(
     const LaunchDimensions& launch_dims, int unroll_factor, const Shape& shape,
-    SymbolicExprContext* symbolic_expr_context) {
+    mlir::MLIRContext* mlir_context) {
   WorkDimensions work_dimensions = launch_dims.AsWorkDimensions();
   work_dimensions.work_tile_size.dimensions.push_back(unroll_factor);
   return emitters::GetDefaultWorkItemIndexingMap(work_dimensions, shape,
-                                                 symbolic_expr_context);
+                                                 mlir_context);
 }
 
 std::string GetSanitizedUniqueName(IrEmitterContext& ir_emitter_context,
@@ -115,23 +114,21 @@ std::string GetSanitizedUniqueName(IrEmitterContext& ir_emitter_context,
 }
 
 absl::StatusOr<llvm::Function*> BuildKernelPrototype(
-    IrEmitterContext& ir_emitter_context, const std::string& impl_fn_name,
-    const std::string& suggested_name,
+    llvm::Module* llvm_module, const se::DeviceDescription& gpu_device_info,
+    const std::string& impl_fn_name, const std::string& unique_kernel_name,
     const emitters::KernelArguments& arguments,
     const LaunchDimensions& launch_dimensions, llvm::IRBuilderBase* builder) {
   return BuildKernelPrototypeFromUniqueName(
-      ir_emitter_context, impl_fn_name,
-      GetSanitizedUniqueName(ir_emitter_context, suggested_name), arguments,
+      llvm_module, gpu_device_info, impl_fn_name, unique_kernel_name, arguments,
       launch_dimensions, builder);
 }
 
 absl::StatusOr<llvm::Function*> BuildKernelPrototypeFromUniqueName(
-    IrEmitterContext& ir_emitter_context, const std::string& impl_fn_name,
-    const std::string& unique_kernel_name,
+    llvm::Module* llvm_module, const se::DeviceDescription& gpu_device_info,
+    const std::string& impl_fn_name, const std::string& unique_kernel_name,
     const emitters::KernelArguments& arguments,
     const LaunchDimensions& launch_dimensions, llvm::IRBuilderBase* builder) {
   // Create the kernel and add it to the module.
-  auto* llvm_module = ir_emitter_context.llvm_module();
   llvm::LLVMContext& context = llvm_module->getContext();
   // Explicitly set global addrspace for SPIR backend.
   int addrspace = llvm::Triple(llvm_module->getTargetTriple()).isSPIR() ? 1 : 0;
@@ -145,9 +142,8 @@ absl::StatusOr<llvm::Function*> BuildKernelPrototypeFromUniqueName(
                              unique_kernel_name, llvm_module);
 
   AnnotateFunctionAsGpuKernel(llvm_module, kernel, builder);
-  TF_RETURN_IF_ERROR(
-      AnnotateKernelLaunchDimensions(ir_emitter_context.gpu_device_info(),
-                                     launch_dimensions, kernel, llvm_module));
+  TF_RETURN_IF_ERROR(AnnotateKernelLaunchDimensions(
+      gpu_device_info, launch_dimensions, kernel, llvm_module));
 
   // Update the insert point to the entry basic block.
   llvm::BasicBlock* entry_bb =

@@ -98,7 +98,6 @@ limitations under the License.
 #include "xla/backends/gpu/codegen/triton/compilation_pipeline.h"
 #include "xla/backends/gpu/codegen/triton/dot_algorithms.h"
 #include "xla/backends/gpu/codegen/triton/emitter_helpers.h"
-#include "xla/backends/gpu/codegen/triton/fusion_emitter_legacy_matmul.h"
 #include "xla/backends/gpu/codegen/triton/ir/triton_xla_ops.h"
 #include "xla/backends/gpu/codegen/triton/support.h"
 #include "xla/backends/gpu/codegen/triton/transforms/passes.h"
@@ -169,6 +168,7 @@ namespace xgt = ::xla::gpu::triton;
 using ::llvm::SmallVector;
 using ::mlir::AffineMap;
 using ::mlir::ArrayRef;
+using ::mlir::MLIRContext;
 using ::mlir::Type;
 using ::mlir::Value;
 using ::mlir::ValueRange;
@@ -1403,7 +1403,7 @@ absl::Status EmitGeneric(
     EmitterSpecificConstraintsBuilder emitter_specific_constraints_builder,
     const HloFusionInstruction* fusion, xtile::EntryFuncOp fn,
     const BlockLevelParameters& block_level_parameters,
-    SymbolicExprContext* symbolic_expr_context) {
+    MLIRContext* mlir_context) {
   if (VLOG_IS_ON(6)) {
     VLOG(6) << "Emitting Triton IR for fusion\n"
             << ExtractInstructionIntoNewModule(*fusion)->ToString();
@@ -1411,8 +1411,7 @@ absl::Status EmitGeneric(
   const HloComputation* computation = fusion->fused_instructions_computation();
   SymbolicTileAnalysisOrError symbolic_tile_analysis_or =
       SymbolicTileAnalysis::AnalyzeComputation(
-          *computation, symbolic_expr_context,
-          emitter_specific_constraints_builder);
+          *computation, mlir_context, emitter_specific_constraints_builder);
 
   if (std::holds_alternative<FusionDecision>(symbolic_tile_analysis_or)) {
     return Internal(
@@ -1638,18 +1637,16 @@ absl::StatusOr<mlir::OwningOpRef<mlir::ModuleOp>> CreateTritonModule(
     absl::string_view fn_name, const HloFusionInstruction* fusion,
     const se::DeviceDescription& device_info,
     const BlockLevelParameters& block_level_parameters,
-    SymbolicExprContext& symbolic_expr_context) {
+    MLIRContext& mlir_context) {
   TF_RETURN_IF_ERROR(IsTritonSupportedFusion(*fusion, device_info));
 
   // TODO: b/451959933 - Use reference or check pointer.
-  mlir::MLIRContext& mlir_context = *symbolic_expr_context.GetMLIRContext();
 
   TF_ASSIGN_OR_RETURN(
       auto triton_module,
       ir_emitter_triton_internal::EmitXTileModule(
           fn_name, TritonEmitterConstraints::GetBuilder(device_info), fusion,
-          block_level_parameters, symbolic_expr_context,
-          ir_emitter_triton_internal::LegacyMatmulEmitter(device_info)));
+          block_level_parameters, mlir_context));
 
   const HloComputation* hlo_computation =
       fusion->fused_instructions_computation();
@@ -1709,14 +1706,12 @@ absl::StatusOr<TritonWrapperResult> TritonWrapper(
     const se::GpuComputeCapability& gpu_cc,
     const se::DeviceDescription& device_info,
     const BlockLevelParameters& block_level_parameters,
-    llvm::Module* llvm_module, SymbolicExprContext& symbolic_expr_context) {
-  mlir::MLIRContext& mlir_context = *symbolic_expr_context.GetMLIRContext();
+    llvm::Module* llvm_module, MLIRContext& mlir_context) {
   TF_RETURN_IF_ERROR(CheckAtLeastAmpere(gpu_cc));
 
-  TF_ASSIGN_OR_RETURN(
-      mlir::OwningOpRef<mlir::ModuleOp> triton_module,
-      CreateTritonModule(fn_name, fusion, device_info, block_level_parameters,
-                         symbolic_expr_context));
+  TF_ASSIGN_OR_RETURN(mlir::OwningOpRef<mlir::ModuleOp> triton_module,
+                      CreateTritonModule(fn_name, fusion, device_info,
+                                         block_level_parameters, mlir_context));
 
   VLOG(3) << fusion->ToString(HloPrintOptions::ShortParsable());
   VLOG(3) << fusion->fused_instructions_computation()->ToString(
@@ -1932,17 +1927,6 @@ std::string GetLibdevicePath(const HloModuleConfig& hlo_config,
 
 namespace ir_emitter_triton_internal {
 
-absl::Status LegacyMatmulEmitter::Emit(
-    EmitterLocOpBuilder& b, const HloFusionInstruction* fusion,
-    xtile::EntryFuncOp& fn,
-    const BlockLevelParameters& block_level_parameters) {
-  std::string libdevice_path =
-      GetLibdevicePath(fusion->GetModule()->config(), device_info_);
-  TF_RETURN_IF_ERROR(EmitMatMul(b, libdevice_path, device_info_, fusion, fn,
-                                block_level_parameters));
-  return absl::OkStatus();
-}
-
 // TODO(b/447133106): Contrary to the name, this function still does a lot of
 // triton specific things. It should be migrated to use non-triton specific
 // utilities.
@@ -1951,9 +1935,7 @@ absl::StatusOr<mlir::OwningOpRef<mlir::ModuleOp>> EmitXTileModule(
     EmitterSpecificConstraintsBuilder emitter_specific_constraints_builder,
     const HloFusionInstruction* fusion,
     const BlockLevelParameters& block_level_parameters,
-    SymbolicExprContext& symbolic_expr_context,
-    std::optional<LegacyMatmulEmitter> legacy_matmul_emitter) {
-  mlir::MLIRContext& mlir_context = *symbolic_expr_context.GetMLIRContext();
+    MLIRContext& mlir_context) {
   LoadMlirDialectsForTriton(mlir_context);
   const auto debug_options = fusion->GetModule()->config().debug_options();
 
@@ -1970,9 +1952,32 @@ absl::StatusOr<mlir::OwningOpRef<mlir::ModuleOp>> EmitXTileModule(
       llvm_ir::CreateMlirModuleOp(loc);
   b.setInsertionPointToEnd(triton_module->getBody());
 
-  auto backend_config =
-      fusion->backend_config<GpuBackendConfig>()->fusion_backend_config();
-  absl::string_view fusion_kind = backend_config.kind();
+  std::string fusion_kind(kTritonFusionKind);
+  if (fusion->has_backend_config()) {
+    auto backend_config = fusion->backend_config<GpuBackendConfig>();
+    if (backend_config.ok()) {
+      fusion_kind = backend_config->fusion_backend_config().kind();
+    }
+  }
+
+  if (fusion_kind == kTritonGemmFusionKind) {
+    return Internal(
+        "Attempted to emit a GEMM fusion through the legacy Triton "
+        "emitter, but it has been deleted. This is a bug.");
+  }
+
+  // TODO(bchetioui,pifon): this list should be consolidated; why do we need so
+  // many different fusion kinds?
+  const std::vector<absl::string_view> kSupportedFusionKinds = {
+      kTritonFusionKind,
+      kTritonNestedGemmFusionKind,
+      kTritonScaledDotFusionKind,
+      kTritonCollectiveFusionKind,
+  };
+
+  if (!absl::c_linear_search(kSupportedFusionKinds, fusion_kind)) {
+    return Internal("Unsupported fusion kind: %s", fusion_kind);
+  }
 
   // Build Triton kernel.
   SmallVector<Type> fn_arg_types;
@@ -2013,32 +2018,11 @@ absl::StatusOr<mlir::OwningOpRef<mlir::ModuleOp>> EmitXTileModule(
   fn.addEntryBlock();
   b.setInsertionPointToStart(&fn.front());
 
-  if (fusion_kind == kTritonGemmFusionKind) {
-    if (absl::c_contains(
-            fusion->GetModule()
-                ->config()
-                .debug_options()
-                .xla_gpu_unsupported_generic_triton_emitter_features(),
-            DebugOptions::GENERIC_TRITON_EMITTER_DISABLE_LEGACY_GEMM)) {
-      return Internal("Legacy GEMM emitter is disabled.");
-    }
-    CHECK(legacy_matmul_emitter.has_value())
-        << "emit_legacy_matmul_fn is not set";
-    TF_RETURN_IF_ERROR(
-        legacy_matmul_emitter->Emit(b, fusion, fn, block_level_parameters));
-  } else if (fusion_kind == kTritonFusionKind ||
-             fusion_kind == kTritonNestedGemmFusionKind ||
-             fusion_kind == kTritonScaledDotFusionKind ||
-             fusion_kind == kTritonCollectiveFusionKind) {
-    TF_RETURN_IF_ERROR(EmitGeneric(b, emitter_specific_constraints_builder,
-                                   fusion, fn, block_level_parameters,
-                                   &symbolic_expr_context));
-  } else {
-    return Internal("Unsupported fusion kind: %s", fusion_kind);
-  }
+  TF_RETURN_IF_ERROR(EmitGeneric(b, emitter_specific_constraints_builder,
+                                 fusion, fn, block_level_parameters,
+                                 &mlir_context));
 
   b.create<xtile::EntryFuncReturnOp>();
-
   return triton_module;
 }
 
@@ -2061,6 +2045,7 @@ absl::Status LowerXTileToTriton(mlir::ModuleOp xtile_dialect_module,
     if (fusion_kind != kTritonGemmFusionKind) {
       pm.addPass(xtile::createConvertElementwise0DTensorToScalarPass());
     }
+    pm.addPass(mlir::triton::xla::CreateArithFP8ConversionToTritonPass());
     pm.addPass(mlir::triton::xla::CreateTensorLowerToTritonPass());
     pm.addPass(mlir::triton::xla::CreateStableHLOLowerToTritonPass());
     pm.addPass(mlir::triton::xla::CreateXTileLowerToTritonPass());
