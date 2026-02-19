@@ -84,6 +84,10 @@ bool NcclCollectives::IsGlobalConfig() const {
   return nccl_comm_id != nullptr;
 }
 
+bool NcclCollectives::SupportsDeviceComm() const {
+  return NCCL_VERSION_CODE >= 22800;
+}
+
 absl::StatusOr<const NcclCollectives::CliqueIdCallback*>
 NcclCollectives::GetCliqueIdCallback(const CliqueIdCallback* clique_id_callback,
                                      bool is_local) {
@@ -393,6 +397,12 @@ class NcclIdStore {
 
 absl::Status NcclCollectives::InitializeTopology(
     NcclCollectives::Topology topology) {
+  // TODO(b/476253257): Replace this with proper topology argument for
+  // custom calls.
+  topology_.node_id = topology.node_id;
+  topology_.num_nodes = topology.num_nodes;
+  topology_.device_count_per_process = topology.device_count_per_process;
+
   if (xla::GetDebugOptionsFromFlags().xla_gpu_experimental_enable_nvshmem()) {
     TF_ASSIGN_OR_RETURN(auto* nvshmem_collectives, GetNvshmemCollectives());
     TF_RETURN_IF_ERROR(nvshmem_collectives->InitializeTopology(topology));
