@@ -13,7 +13,6 @@ load(
     "//xla/tsl:tsl.default.bzl",
     "filegroup",
     "if_cuda_tools",
-    "tsl_grpc_cc_dependencies",
 )
 load("//xla/tsl/platform:rules_cc.bzl", "cc_library")
 load(
@@ -167,6 +166,7 @@ cc_library(
         "@com_google_absl//absl/functional:any_invocable",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:cord",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
@@ -251,8 +251,9 @@ cc_library(
     ],
     deps = [
         "//xla/tsl/platform:logging",
+        "@com_github_grpc_grpc//:grpc++",
         "@com_google_absl//absl/log:check",
-    ] + tsl_grpc_cc_dependencies(),
+    ],
 )
 
 cc_library(

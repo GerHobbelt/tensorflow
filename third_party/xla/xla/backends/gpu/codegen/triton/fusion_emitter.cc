@@ -99,6 +99,7 @@ limitations under the License.
 #include "xla/backends/gpu/codegen/triton/dot_algorithms.h"
 #include "xla/backends/gpu/codegen/triton/emitter_helpers.h"
 #include "xla/backends/gpu/codegen/triton/ir/triton_xla_ops.h"
+#include "xla/backends/gpu/codegen/triton/lowering_util.h"
 #include "xla/backends/gpu/codegen/triton/support.h"
 #include "xla/backends/gpu/codegen/triton/transforms/passes.h"
 #include "xla/codegen/emitter_loc_op_builder.h"
@@ -115,7 +116,6 @@ limitations under the License.
 #include "xla/codegen/xtile/ir/xtile_dialect.h"
 #include "xla/codegen/xtile/ir/xtile_ops.h"
 #include "xla/hlo/analysis/indexing_map.h"
-#include "xla/hlo/analysis/symbolic_expr.h"
 #include "xla/hlo/builder/xla_builder.h"
 #include "xla/hlo/ir/hlo_casting_utils.h"
 #include "xla/hlo/ir/hlo_computation.h"
@@ -188,29 +188,6 @@ namespace {
 
 Value MakeIndex(EmitterLocOpBuilder& b, int64_t value) {
   return arith::ConstantIndexOp::create(b, value);
-}
-
-// Same as HLO BroadcastInDims. The sorted indices in `dims` specify the mapping
-// of the input dimensions to the output dimensions.
-TensorValue BroadcastInDims(EmitterLocOpBuilder b, TensorValue value,
-                            ArrayRef<int64_t> output_shape,
-                            ArrayRef<int64_t> dims) {
-  CHECK(llvm::is_sorted(dims)) << "broadcast dims must be sorted";
-
-  auto result_type = mlir::RankedTensorType::get(
-      output_shape, value.getType().getElementType());
-
-  return stablehlo::BroadcastInDimOp::create(b, result_type, value, dims);
-}
-
-TensorValue Splat(EmitterLocOpBuilder b, Value value,
-                  ArrayRef<int64_t> output_shape) {
-  auto tensor_value = mlir::dyn_cast<TensorValue>(value);
-  if (!tensor_value) {
-    tensor_value = mlir::tensor::FromElementsOp::create(
-        b, mlir::RankedTensorType::get({}, value.getType()), value);
-  }
-  return BroadcastInDims(b, tensor_value, output_shape, /*dims=*/{});
 }
 
 TensorValue Iota(EmitterLocOpBuilder b, int32_t limit) {
@@ -293,8 +270,8 @@ absl::StatusOr<TensorValue> EmitReduce(
 
     TF_RET_CHECK(!to_emit.empty());
 
-    TF_ASSIGN_OR_RETURN(TensorValue result, EmitScope(b, /*analysis=*/nullptr,
-                                                      to_emit, region_values));
+    TF_ASSIGN_OR_RETURN(TensorValue result,
+                        EmitScope(b, to_emit, region_values));
     stablehlo::ReturnOp::create(b, SmallVector<Value>({result}));
     b.setInsertionPointAfter(reduction);
   }
@@ -323,8 +300,9 @@ TensorValue EmitTiledBroadcast(
       GetPaddedTileSizes(output_tile_shape);
 
   TensorValue input = values[tiled_broadcast.operand(0)];
-  return BroadcastInDims(b, input, padded_output_tile_shape,
-                         MakeArrayRef(tiled_broadcast.hlo()->dimensions()));
+  return triton::BroadcastInDims(
+      b, input, padded_output_tile_shape,
+      MakeArrayRef(tiled_broadcast.hlo()->dimensions()));
 }
 
 absl::StatusOr<TensorValue> EmitTiledIota(
@@ -350,13 +328,14 @@ absl::StatusOr<TensorValue> EmitTiledIota(
   // First, stride as needed between the iota components.
   Value range = arith::MulIOp::create(
       b, Iota(b, padded_tile_sizes[iota_dim]),
-      Splat(b,
-            CreateConst(b, b.getI32Type(), tiled_iota.tile_strides()[iota_dim]),
-            padded_tile_sizes[iota_dim]));
+      triton::Splat(
+          b,
+          CreateConst(b, b.getI32Type(), tiled_iota.tile_strides()[iota_dim]),
+          padded_tile_sizes[iota_dim]));
 
   // Then, add the base offset to the iota components.
   range = arith::AddIOp::create(
-      b, range, Splat(b, iota_dim_offset, padded_tile_sizes[iota_dim]));
+      b, range, triton::Splat(b, iota_dim_offset, padded_tile_sizes[iota_dim]));
 
   // Cast the result to the targeted type.
   TF_ASSIGN_OR_RETURN(Type iota_element_type,
@@ -366,8 +345,9 @@ absl::StatusOr<TensorValue> EmitTiledIota(
 
   // And finally, produce a broadcast along the non-iota dimensions in order to
   // produce the whole iota tile.
-  return BroadcastInDims(b, mlir::cast<TensorValue>(range), padded_tile_sizes,
-                         /*dims=*/{iota_dim});
+  return triton::BroadcastInDims(b, mlir::cast<TensorValue>(range),
+                                 padded_tile_sizes,
+                                 /*dims=*/{iota_dim});
 }
 
 SmallVector<Value> GetRuntimeValues(
@@ -572,7 +552,8 @@ absl::StatusOr<TensorValue> MaskDotOperand(
       Value tile_offset = arith::MulIOp::create(
           b, contracting_dimension_tile_index, tile_size_value);
       TensorValue range = Iota(b, tile_size);
-      TensorValue broadcasted_tile_offset = Splat(b, tile_offset, {tile_size});
+      TensorValue broadcasted_tile_offset =
+          triton::Splat(b, tile_offset, {tile_size});
       Value indices = arith::AddIOp::create(b, range, broadcasted_tile_offset);
 
       Value boundary = CreateConst(b, b.getI32Type(),
@@ -581,8 +562,8 @@ absl::StatusOr<TensorValue> MaskDotOperand(
       Value mask = arith::CmpIOp::create(b, arith::CmpIPredicate::slt, indices,
                                          boundary);
 
-      mask = BroadcastInDims(b, mlir::cast<TensorValue>(mask), tile_shape,
-                             {contraction_dimension_index});
+      mask = triton::BroadcastInDims(b, mlir::cast<TensorValue>(mask),
+                                     tile_shape, {contraction_dimension_index});
       TF_ASSIGN_OR_RETURN(
           auto element_type,
           TritonType(b, dot_operand.hlo()->shape().element_type()));
@@ -1134,14 +1115,15 @@ absl::StatusOr<TensorValue> EmitPad(
 
     // LHS for the compare is an iota broadcasted to the output shape.
     TensorValue range = Iota(b, pad_output_dim_size);
-    TensorValue bcast = BroadcastInDims(b, range, padded_tile_sizes,
-                                        {static_cast<int64_t>(dim_index)});
+    TensorValue bcast = triton::BroadcastInDims(
+        b, range, padded_tile_sizes, {static_cast<int64_t>(dim_index)});
 
     // RHS for the compare is splat(pad_input_dim_size - tile_offset).
     Value tile_offset_i32 = Cast(b, tile_offset, i32_type);
     Value threshold = arith::SubIOp::create(
         b, CreateConst(b, i32_type, pad_input_dim_size), tile_offset_i32);
-    TensorValue threshold_splat = Splat(b, threshold, padded_tile_sizes);
+    TensorValue threshold_splat =
+        triton::Splat(b, threshold, padded_tile_sizes);
     Value cmp = arith::CmpIOp::create(b, arith::CmpIPredicate::slt, bcast,
                                       threshold_splat);
     mask = mask ? arith::AndIOp::create(b, mask, cmp) : cmp;
@@ -1152,7 +1134,7 @@ absl::StatusOr<TensorValue> EmitPad(
   const TiledHloInstruction* padding_value = tiled_pad.operand(1);
 
   TensorValue pad_value_splat =
-      Splat(b, values[padding_value], padded_tile_sizes);
+      triton::Splat(b, values[padding_value], padded_tile_sizes);
   return mlir::cast<TensorValue>(
       arith::SelectOp::create(b, mask, values[tiled_operand], pad_value_splat)
           .getResult());
@@ -1656,7 +1638,8 @@ absl::StatusOr<mlir::OwningOpRef<mlir::ModuleOp>> CreateTritonModule(
 
   const auto debug_options = fusion->GetModule()->config().debug_options();
 
-  if (DumpingEnabledForHloModule(*hlo_computation->parent())) {
+  if (DumpingEnabledForHloModule(*hlo_computation->parent()) &&
+      DumpingEnabledForEmitter("triton-fusion", debug_options)) {
     auto suffix = absl::StrCat(fusion->name(), ".before_validation.ttir.txt");
     DumpToFileInDirOrStdout(
         *hlo_computation->parent(), "", suffix,
@@ -1679,7 +1662,8 @@ absl::StatusOr<mlir::OwningOpRef<mlir::ModuleOp>> CreateTritonModule(
                               ->config()
                               .debug_options()
                               .xla_gpu_unsupported_annotate_with_emitter_loc());
-  if (DumpingEnabledForHloModule(*hlo_computation->parent())) {
+  if (DumpingEnabledForHloModule(*hlo_computation->parent()) &&
+      DumpingEnabledForEmitter("triton-fusion", debug_options)) {
     std::string suffix = absl::StrCat(fusion->name(), ".ttir.txt");
     DumpToFileInDirOrStdout(
         *hlo_computation->parent(), "", suffix,
@@ -1749,8 +1733,7 @@ absl::StatusOr<TritonWrapperResult> CompileTritonToLLVM(
   bool should_dump_mlir_passes =
       hlo_config.debug_options().xla_enable_dumping() &&
       DumpingEnabledForHloModule(hlo_module) &&
-      DumpingEnabledForHloPass("triton-fusion-emitter",
-                               hlo_config.debug_options());
+      DumpingEnabledForEmitter("triton-fusion", hlo_config.debug_options());
 
   mlir::PassManager pm(&mlir_context);
   pm.enableVerifier(should_verify);
@@ -1787,7 +1770,7 @@ absl::StatusOr<TritonWrapperResult> CompileTritonToLLVM(
       }
     } else {
       LOG(ERROR)
-          << "--xla_dump_hlo_pass_re=triton-fusion-emitter is set, but neither "
+          << "--xla_dump_emitter_re=triton-fusion is set, but neither "
           << "the environment variable TEST_UNDECLARED_OUTPUTS_DIR nor the "
           << "flag --xla_dump_to is set, so the llvm dumps are disabled.";
     }
@@ -2033,20 +2016,12 @@ absl::Status LowerXTileToTriton(mlir::ModuleOp xtile_dialect_module,
                                 const HloFusionInstruction& fusion,
                                 const se::DeviceDescription& device_info) {
   {
-    auto backend_config =
-        fusion.backend_config<GpuBackendConfig>()->fusion_backend_config();
-    absl::string_view fusion_kind = backend_config.kind();
-
     // Convert xTile ops to Triton ops.
     mlir::PassManager pm(&mlir_context);
     // Disable verifier because the Triton code may be invalid due to the
     // unsupported types.
     pm.enableVerifier(/*enabled=*/false);
-    // The legacy emitter supports 0D tensors so we would get inconsistent
-    // results if we try to rewrite them.
-    if (fusion_kind != kTritonGemmFusionKind) {
-      pm.addPass(xtile::createConvertElementwise0DTensorToScalarPass());
-    }
+    pm.addPass(xtile::createConvertElementwise0DTensorToScalarPass());
     pm.addPass(mlir::triton::xla::CreateArithFP8ConversionToTritonPass());
     pm.addPass(mlir::triton::xla::CreateTensorLowerToTritonPass());
     pm.addPass(mlir::triton::xla::CreateStableHLOLowerToTritonPass());

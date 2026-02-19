@@ -389,6 +389,8 @@ cc_library(
         "//xla:xla_proto_cc",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/parser:hlo_parser",
+        "//xla/hlo/translate/mhlo_to_hlo:translate",
+        "//xla/hlo/translate/stablehlo_to_hlo:translate",
         "//xla/service:hlo_module_config",
         "//xla/service:hlo_proto_cc",
         "@com_google_absl//absl/status",
@@ -396,6 +398,7 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_protobuf//:protobuf",
         "@com_googlesource_code_re2//:re2",
+        "@llvm-project//llvm:Support",
         "@local_tsl//tsl/platform:env",
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:logging",
@@ -546,8 +549,6 @@ xla_cc_binary(
         ":run_hlo_module_lib",
         ":run_hlo_module_proto_cc",
         "//xla:debug_options_flags",
-        "//xla/hlo/translate/mhlo_to_hlo:translate",
-        "//xla/hlo/translate/stablehlo_to_hlo:translate",
         "//xla/service:cpu_plugin",
         "//xla/service:hlo_module_config",
         "//xla/service:hlo_runner",
@@ -558,7 +559,6 @@ xla_cc_binary(
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
-        "@llvm-project//llvm:Support",
         "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:path",
         "@local_tsl//tsl/platform:platform_port",
@@ -1027,6 +1027,7 @@ tsl_gpu_library(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
+        "@com_google_protobuf//:protobuf",
         "@llvm-project//mlir:ArithDialect",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
@@ -1085,7 +1086,9 @@ xla_test(
         "@local_tsl//tsl/platform:status_matchers",
         "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/platform:test",
-    ] + if_google(["@com_google_protobuf//:duration_cc_proto"]),
+    ] + if_google(["@com_google_protobuf//:duration_cc_proto"]) + if_cuda([
+        "//xla/tsl/cuda:nvml",
+    ]),
 )
 
 xla_test(
