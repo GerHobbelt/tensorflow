@@ -1662,8 +1662,8 @@ FileLocations
 3 {file_name_id=2 function_name_id=2 line=83 end_line=83 column=2 end_column=15}
 
 StackFrames
-1 {file_location_id=1 parent_frame_id=0}
-2 {file_location_id=2 parent_frame_id=1}
+1 {file_location_id=1 parent_frame_id=1}
+2 {file_location_id=2 parent_frame_id=2}
 
 
 ENTRY %constant_pred () -> pred[] {
@@ -2690,6 +2690,27 @@ R"(HloModule BitcastConvert, entry_computation_layout={(f32[100]{0})->u32[100]{0
 ENTRY BitcastConvertUsage {
   p = f32[100]{0} parameter(0)
   ROOT out = u32[100]{0} bitcast-convert(p)
+}
+
+)"
+},
+
+// Scan
+{
+"Scan",
+R"(HloModule scan_module, entry_computation_layout={(f32[4]{0})->(f32[4]{0}, f32[])}
+
+add_F32 {
+  lhs = f32[] parameter(0)
+  rhs = f32[] parameter(1)
+  add = f32[] add(lhs, rhs)
+  ROOT t = (f32[], f32[]) tuple(add, add)
+}
+
+ENTRY Scan {
+  input = f32[4]{0} parameter(0)
+  init = f32[] constant(0)
+  ROOT scan = (f32[4]{0}, f32[]) scan(input, init), dimensions={0}, is_reverse=true, is_associative=true, to_apply=add_F32
 }
 
 )"
@@ -4276,8 +4297,8 @@ FileLocations
 3 {file_name_id=2 function_name_id=2 line=83 end_line=83 column=2 end_column=15}
 
 StackFrames
-1 {file_location_id=1 parent_frame_id=0}
-2 {file_location_id=2 parent_frame_id=1}
+1 {file_location_id=1 parent_frame_id=1}
+2 {file_location_id=2 parent_frame_id=2}
 
 
 ENTRY %constant_pred () -> pred[] {
