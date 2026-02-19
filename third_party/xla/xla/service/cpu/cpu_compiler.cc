@@ -98,8 +98,7 @@ limitations under the License.
 #include "xla/backends/cpu/target_machine_options.h"
 #include "xla/backends/cpu/transforms/collectives/all_reduce_combiner.h"
 #include "xla/backends/cpu/transforms/library_rewriter.h"
-#include "xla/backends/cpu/transforms/xnn_graph_fusion.h"
-#include "xla/backends/cpu/xnn_support.h"
+#include "xla/backends/cpu/ynn_support.h"
 #include "xla/hlo/analysis/alias_info.h"
 #include "xla/hlo/analysis/hlo_ordering.h"
 #include "xla/hlo/ir/dfs_hlo_visitor_with_default.h"
@@ -250,10 +249,6 @@ limitations under the License.
 #include "xla/service/cpu/onednn_float_support.h"
 #include "xla/service/cpu/onednn_ops_rewriter.h"
 #endif  // XLA_ONEDNN
-
-#ifdef XLA_YNNPACK
-#include "xla/backends/cpu/ynn_support.h"
-#endif  // XLA_YNNPACK
 
 namespace xla {
 namespace {
@@ -492,22 +487,13 @@ std::unique_ptr<HloPassFix<HloPassPipeline>> CreateSimplificationPipeline(
     pipeline->AddPass<GatherSimplifier>();
   }
 
-  if (module->config()
-              .debug_options()
-              .xla_cpu_experimental_xnn_graph_fusion_mode() ==
-          DebugOptions::XNN_GRAPH_FUSION_MODE_DISABLED &&
-      !absl::c_contains(module->config()
-                            .debug_options()
-                            .xla_cpu_experimental_xnn_fusion_type(),
-                        DebugOptions::LIBRARY_FUSION_TYPE_REDUCE) &&
-      !absl::c_contains(module->config()
+  if (!absl::c_contains(module->config()
                             .debug_options()
                             .xla_cpu_experimental_ynn_fusion_type(),
                         DebugOptions::LIBRARY_FUSION_TYPE_REDUCE)) {
     pipeline->AddPass<TreeReductionRewriter>();
   }
 
-#ifdef XLA_YNNPACK
   if (absl::c_contains(module->config()
                            .debug_options()
                            .xla_cpu_experimental_ynn_fusion_type(),
@@ -517,7 +503,6 @@ std::unique_ptr<HloPassFix<HloPassPipeline>> CreateSimplificationPipeline(
           return !IsReduceOpOffloadedToYnn(hlo);
         });
   }
-#endif
 
   // BatchNormExpander can create zero-sized ops, so zero-sized HLO
   // elimination has to come after that pass.
@@ -548,10 +533,7 @@ auto LibrarySupportsConvolution(
       module->config().debug_options().xla_cpu_experimental_ynn_fusion_type(),
       DebugOptions::LIBRARY_FUSION_TYPE_INDIVIDUAL_CONVOLUTION);
   return [=](const HloInstruction& instr) {
-#ifdef XLA_YNNPACK
     return ynnpack_convolution_enabled && IsConvolutionOpSupportedByYnn(&instr);
-#endif  // XLA_YNNPACK
-    return false;
   };
 }
 
@@ -560,23 +542,10 @@ auto LibrarySupportsDot(HloModule* module,
   // TODO(b/406806134): Stop calling XNNPACK from regular Dot thunks. All XNN
   // Dots should be wrapped in an `__xnn_fusion` fusion region and processed in
   // `XnnFusionThunk`.
-  const bool xnnpack_enabled =
-      module->config().debug_options().xla_cpu_use_xnnpack();
-  const auto xnn_graph_fusion_mode =
-      module->config()
-          .debug_options()
-          .xla_cpu_experimental_xnn_graph_fusion_mode();
-  const bool xnnpack_use_cost_model =
-      xnn_graph_fusion_mode !=
-      DebugOptions::XNN_GRAPH_FUSION_MODE_BYPASS_COST_MODEL;
-  const bool xnnpack_dot_enabled =
-      xnnpack_enabled &&
-      xnn_graph_fusion_mode != DebugOptions::XNN_GRAPH_FUSION_MODE_DISABLED;
   const bool ynnpack_dot_enabled = absl::c_linear_search(
       module->config().debug_options().xla_cpu_experimental_ynn_fusion_type(),
       DebugOptions::LIBRARY_FUSION_TYPE_INDIVIDUAL_DOT);
   return [=](const HloInstruction& instr) {
-#ifdef XLA_YNNPACK
     if (ynnpack_dot_enabled &&
         IsDotSupportedByYnn(instr.dot_dimension_numbers(),
                             instr.operand(0)->shape(),
@@ -584,16 +553,7 @@ auto LibrarySupportsDot(HloModule* module,
             .value_or(false)) {
       return true;
     }
-#endif  // XLA_YNNPACK
 
-    if (xnnpack_dot_enabled &&
-        IsDotSupportedByXnn(instr.dot_dimension_numbers(),
-                            instr.operand(0)->shape(),
-                            instr.operand(1)->shape(), instr.shape(),
-                            target_machine_features, xnnpack_use_cost_model)
-            .value_or(false)) {
-      return true;
-    }
     return false;
   };
 }
@@ -1007,29 +967,20 @@ absl::Status CpuCompiler::RunHloPassesAfterLayoutAssn(
   // XNNPACK ops availability checks depend on the layout information,
   // so until another solution is developed the passes creating XNNPACK fusions
   // have to run after layout assignment.
-  const bool use_ynnpack = absl::c_linear_search(
-      debug_options.xla_cpu_experimental_ynn_fusion_type(),
-      DebugOptions::LIBRARY_FUSION_TYPE_REDUCE);
+  const bool use_ynnpack =
+      !debug_options.xla_cpu_experimental_ynn_fusion_type().empty();
   LibraryRewriterOptions options = {
       /*use_onednn=*/debug_options.xla_cpu_use_onednn(),
-      /*use_xnnpack=*/debug_options.xla_cpu_use_xnnpack(),
       /*use_ynnpack=*/use_ynnpack,
       /*onednn_fusion_types=*/
       &debug_options.xla_cpu_experimental_onednn_fusion_type(),
-      /*xnn_fusion_types=*/
-      &debug_options.xla_cpu_experimental_xnn_fusion_type(),
       /*ynn_fusion_types=*/
       &debug_options.xla_cpu_experimental_ynn_fusion_type()};
-  if (options.use_onednn || options.use_xnnpack || options.use_ynnpack) {
+  if (options.use_onednn || options.use_ynnpack) {
     HloPassPipeline lib_pipeline("dot-library-passes");
     lib_pipeline.AddPass<DotDecomposer>();
     lib_pipeline.AddPass<LibraryRewriter>(target_machine_features, options);
     TF_RETURN_IF_ERROR(lib_pipeline.Run(module).status());
-  }
-
-  if (debug_options.xla_cpu_experimental_xnn_graph_fusion_mode() !=
-      DebugOptions::XNN_GRAPH_FUSION_MODE_DISABLED) {
-    pipeline.AddPass<XnnGraphFusion>();
   }
 
   bool use_multi_output_fusion =
