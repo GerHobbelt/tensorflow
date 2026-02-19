@@ -1,4 +1,4 @@
-/* Copyright 2020 The OpenXLA Authors.
+/* Copyright 2025 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,18 +13,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_SERVICE_CPU_RUNTIME_TOPK_H_
-#define XLA_SERVICE_CPU_RUNTIME_TOPK_H_
+#include "xla/backends/cpu/runtime/dot_lib.h"  // IWYU pragma: keep
 
-#include <stdint.h>
+#if defined(TENSORFLOW_USE_CUSTOM_CONTRACTION_KERNEL)
+#include "xla/tsl/framework/contraction/eigen_contraction_kernel.h"  // IWYU pragma: keep
+#endif
 
-extern "C" {
-
-// Calculates `batch_size` topk operations with `input_size` inputs each. The
-// outputs are written to `out_values` and `out_indices`.
-extern void __xla_cpu_runtime_TopKF32(int64_t batch_size, int64_t input_size,
-                                      int64_t k, const float* values,
-                                      float* out_values, int32_t* out_indices);
-}
-
-#endif  // XLA_SERVICE_CPU_RUNTIME_TOPK_H_
+template void ::xla::cpu::internal::TypedMatMul<int8_t, int8_t, int32_t>(
+    const Eigen::ThreadPoolDevice* device, void* out, void* lhs, void* rhs,
+    int64_t m, int64_t n, int64_t k, bool transpose_lhs, bool transpose_rhs,
+    DoneCallback done);

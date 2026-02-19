@@ -1,4 +1,4 @@
-/* Copyright 2024 The OpenXLA Authors.
+/* Copyright 2025 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,10 +13,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "xla/backends/cpu/runtime/dot_thunk.h"  // NOLINT IWYU pragma: keep
+#ifndef XLA_BACKENDS_GPU_RUNTIME_PRINT_BUFFER_CONTENTS_H_
+#define XLA_BACKENDS_GPU_RUNTIME_PRINT_BUFFER_CONTENTS_H_
 
-template void ::xla::cpu::DotThunk::TypedMatMul<
-    std::complex<double>, std::complex<double>, std::complex<double>>(
-    const Eigen::ThreadPoolDevice* device, void* out, void* lhs, void* rhs,
-    int64_t m, int64_t n, int64_t k, bool transpose_lhs, bool transpose_rhs,
-    DoneCallback done);
+#include "absl/types/span.h"
+#include "xla/stream_executor/kernel_args.h"
+#include "xla/stream_executor/stream.h"
+
+namespace xla::gpu {
+
+// Prints the contents of the buffer arguments in `kernel_args` to LOG(INFO).
+void PrintBufferContents(
+    stream_executor::Stream* stream,
+    absl::Span<const stream_executor::KernelArgument> kernel_args);
+
+}  // namespace xla::gpu
+
+#endif  // XLA_BACKENDS_GPU_RUNTIME_PRINT_BUFFER_CONTENTS_H_
