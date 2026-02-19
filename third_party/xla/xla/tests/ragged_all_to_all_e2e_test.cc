@@ -45,6 +45,7 @@ limitations under the License.
 #include "xla/tsl/platform/errors.h"
 #include "xla/tsl/platform/statusor.h"
 #include "xla/tsl/platform/test.h"
+#include "xla/types.h"
 #include "xla/xla_data.pb.h"
 
 namespace xla {
@@ -54,7 +55,6 @@ using ::testing::NotNull;
 
 enum class RaggedAllToAllImplType {
   kNccl,
-  kMemcpy,
   kDecomposer,
   kOneShot,
 };
@@ -62,8 +62,7 @@ enum class RaggedAllToAllImplType {
 class RaggedAllToAllTestBase : public CollectiveOpsWithFlagsBase {
  public:
   RaggedAllToAllTestBase(bool enable_async, RaggedAllToAllImplType impl_type)
-      : CollectiveOpsWithFlagsBase(
-            enable_async, impl_type == RaggedAllToAllImplType::kMemcpy),
+      : CollectiveOpsWithFlagsBase(enable_async, /*enable_p2p_memcpy=*/false),
         impl_type_(impl_type) {}
 
   // Creates random test data for a ragged-all-to-all.
@@ -354,11 +353,80 @@ TEST_P(RaggedAllToAllTest, RaggedAllToAll_2GPUs) {
                                                      /*replica_1=*/{3, 1}}));
 
   TF_ASSERT_OK_AND_ASSIGN(
-      std::vector<Literal> results,
+      ExecutionResult execution_result,
       ExecuteReplicated(std::move(module), GetInputLiteralPtrs(),
-                        /*device_assignment=*/nullptr,
                         /*num_replicas=*/kNumReplicas,
-                        /*run_hlo_passes=*/true));
+                        /*num_partitions=*/kNumPartitions));
+
+  const std::vector<Literal>& results = execution_result.results;
+
+  ASSERT_EQ(results.size(), kNumReplicas);
+  EXPECT_TRUE(LiteralTestUtil::Equal(expected_outputs_[0], results[0]));
+  EXPECT_TRUE(LiteralTestUtil::Equal(expected_outputs_[1], results[1]));
+}
+
+TEST_P(RaggedAllToAllTest, RaggedAllToAll_2GPUs_S4) {
+  absl::string_view kModuleReplicatedStr = R"(
+  HloModule module, num_partitions=1
+
+  ENTRY entry {
+    input = s4[4,2]{1,0:E(4)} parameter(0)
+    output = s4[4,2]{1,0:E(4)} parameter(1)
+    input_offsets = s32[2] parameter(2)
+    send_sizes = s32[2] parameter(3)
+    output_offsets = s32[2] parameter(4)
+    recv_sizes = s32[2] parameter(5)
+    ROOT ra2a = s4[4,2]{1,0:E(4)} ragged-all-to-all(input, output, 
+      input_offsets, send_sizes, output_offsets, recv_sizes), 
+      replica_groups={{0,1}}
+  })";
+
+  const int64_t kNumReplicas = 2;
+  const int64_t kNumPartitions = 1;
+  ASSERT_GE(hlo_runner_->device_count(), kNumReplicas)
+      << "Test requires at least " << kNumReplicas << " devices ("
+      << hlo_runner_->device_count() << " available)";
+
+  HloModuleConfig config =
+      GetModuleConfigForTest(/*replica_count=*/kNumReplicas * kNumPartitions);
+
+  TF_ASSERT_OK_AND_ASSIGN(
+      auto module, ParseAndReturnVerifiedModule(kModuleReplicatedStr, config));
+
+  TF_ASSERT_OK(CreateRandomTestData(module.get(),
+                                    /*input_sizes=*/{/*replica_0=*/{1, 1},
+                                                     /*replica_1=*/{3, 1}}));
+
+  // `CreateRandomTestData` calculates sizes and offsets metadata, but fill
+  // input and expected output literals with random floats. We need to manually
+  // override them with s4 values.
+  inputs_[0] = LiteralUtil::CreateR2<s4>(
+      {{s4(1), s4(1)}, {s4(2), s4(2)}, {s4(0), s4(0)}, {s4(0), s4(0)}});
+  inputs_[1] = LiteralUtil::CreateR2<s4>(
+      {{s4(3), s4(3)}, {s4(4), s4(4)}, {s4(5), s4(5)}, {s4(6), s4(6)}});
+
+  expected_outputs_[0] = LiteralUtil::CreateR2<s4>(
+      {{s4(1), s4(1)}, {s4(3), s4(3)}, {s4(4), s4(4)}, {s4(5), s4(5)}});
+  expected_outputs_[1] = LiteralUtil::CreateR2<s4>(
+      {{s4(2), s4(2)}, {s4(6), s4(6)}, {s4(-1), s4(-1)}, {s4(-1), s4(-1)}});
+
+  TF_ASSERT_OK_AND_ASSIGN(
+      ExecutionResult execution_result,
+      ExecuteReplicated(std::move(module), GetInputLiteralPtrs(),
+                        /*num_replicas=*/kNumReplicas,
+                        /*num_partitions=*/kNumPartitions));
+
+  // Check that ragged-all-to-all on S4 was converted to S8.
+  // Skip this check for decomposer test, because there ragged-all-to-all was
+  // lowered to all-to-all.
+  if (std::get<1>(GetParam()) != RaggedAllToAllImplType::kDecomposer) {
+    HloInstruction* ragged_all_to_all = FindInstruction(
+        execution_result.optimized_module, HloOpcode::kRaggedAllToAll);
+    ASSERT_NE(ragged_all_to_all, nullptr);
+    EXPECT_EQ(ragged_all_to_all->shape().element_type(), S8);
+  }
+
+  const std::vector<Literal>& results = execution_result.results;
   ASSERT_EQ(results.size(), kNumReplicas);
   EXPECT_TRUE(LiteralTestUtil::Equal(expected_outputs_[0], results[0]));
   EXPECT_TRUE(LiteralTestUtil::Equal(expected_outputs_[1], results[1]));
@@ -396,11 +464,12 @@ TEST_P(RaggedAllToAllTest, RaggedAllToAll_2GPUs_InputBufferLargerThanOutput) {
                                                      /*replica_1=*/{4, 3}}));
 
   TF_ASSERT_OK_AND_ASSIGN(
-      std::vector<Literal> results,
+      ExecutionResult execution_result,
       ExecuteReplicated(std::move(module), GetInputLiteralPtrs(),
-                        /*device_assignment=*/nullptr,
                         /*num_replicas=*/kNumReplicas,
-                        /*run_hlo_passes=*/true));
+                        /*num_partitions=*/kNumPartitions));
+
+  const std::vector<Literal>& results = execution_result.results;
   ASSERT_EQ(results.size(), kNumReplicas);
   EXPECT_TRUE(LiteralTestUtil::Equal(expected_outputs_[0], results[0]));
   EXPECT_TRUE(LiteralTestUtil::Equal(expected_outputs_[1], results[1]));
@@ -438,11 +507,12 @@ TEST_P(RaggedAllToAllTest, RaggedAllToAll_2GPUs_OutputBufferLargerThanInput) {
                                                      /*replica_1=*/{5, 11}}));
 
   TF_ASSERT_OK_AND_ASSIGN(
-      std::vector<Literal> results,
+      ExecutionResult execution_result,
       ExecuteReplicated(std::move(module), GetInputLiteralPtrs(),
-                        /*device_assignment=*/nullptr,
                         /*num_replicas=*/kNumReplicas,
-                        /*run_hlo_passes=*/true));
+                        /*num_partitions=*/kNumPartitions));
+
+  const std::vector<Literal>& results = execution_result.results;
   ASSERT_EQ(results.size(), kNumReplicas);
   EXPECT_TRUE(LiteralTestUtil::Equal(expected_outputs_[0], results[0]));
   EXPECT_TRUE(LiteralTestUtil::Equal(expected_outputs_[1], results[1]));
@@ -480,11 +550,12 @@ TEST_P(RaggedAllToAllTest, RaggedAllToAll_2GPUs_MultipleUpdates) {
                                      /*replica_1=*/{{3, 1}, {1, 1}}}));
 
   TF_ASSERT_OK_AND_ASSIGN(
-      std::vector<Literal> results,
+      ExecutionResult execution_result,
       ExecuteReplicated(std::move(module), GetInputLiteralPtrs(),
-                        /*device_assignment=*/nullptr,
                         /*num_replicas=*/kNumReplicas,
-                        /*run_hlo_passes=*/true));
+                        /*num_partitions=*/kNumPartitions));
+
+  const std::vector<Literal>& results = execution_result.results;
   ASSERT_EQ(results.size(), kNumReplicas);
   EXPECT_TRUE(LiteralTestUtil::Equal(expected_outputs_[0], results[0]));
   EXPECT_TRUE(LiteralTestUtil::Equal(expected_outputs_[1], results[1]));
@@ -523,11 +594,12 @@ TEST_P(RaggedAllToAllTest, RaggedAllToAll_2GPUs_MultiDimData) {
                                                      /*replica_1=*/{2, 5}}));
 
   TF_ASSERT_OK_AND_ASSIGN(
-      std::vector<Literal> results,
+      ExecutionResult execution_result,
       ExecuteReplicated(std::move(module), GetInputLiteralPtrs(),
-                        /*device_assignment=*/nullptr,
                         /*num_replicas=*/kNumReplicas,
-                        /*run_hlo_passes=*/true));
+                        /*num_partitions=*/kNumPartitions));
+
+  const std::vector<Literal>& results = execution_result.results;
   ASSERT_EQ(results.size(), kNumReplicas);
 
   EXPECT_TRUE(LiteralTestUtil::Equal(expected_outputs_[0], results[0]));
@@ -566,11 +638,12 @@ TEST_P(RaggedAllToAllTest, RaggedAllToAll_2GPUs_Degenerate) {
                                                      /*replica_1=*/{3}}));
 
   TF_ASSERT_OK_AND_ASSIGN(
-      std::vector<Literal> results,
+      ExecutionResult execution_result,
       ExecuteReplicated(std::move(module), GetInputLiteralPtrs(),
-                        /*device_assignment=*/nullptr,
                         /*num_replicas=*/kNumReplicas,
-                        /*run_hlo_passes=*/true));
+                        /*num_partitions=*/kNumPartitions));
+
+  const std::vector<Literal>& results = execution_result.results;
   ASSERT_EQ(results.size(), kNumReplicas);
   EXPECT_TRUE(LiteralTestUtil::Equal(expected_outputs_[0], results[0]));
   EXPECT_TRUE(LiteralTestUtil::Equal(expected_outputs_[1], results[1]));
@@ -613,11 +686,12 @@ TEST_P(RaggedAllToAllTest, RaggedAllToAll_2GPUs_NonDefaultLayout) {
                                                      /*replica_1=*/{2, 5}}));
 
   TF_ASSERT_OK_AND_ASSIGN(
-      std::vector<Literal> results,
+      ExecutionResult execution_result,
       ExecuteReplicated(std::move(module), GetInputLiteralPtrs(),
-                        /*device_assignment=*/nullptr,
                         /*num_replicas=*/kNumReplicas,
-                        /*run_hlo_passes=*/true));
+                        /*num_partitions=*/kNumPartitions));
+
+  const std::vector<Literal>& results = execution_result.results;
   ASSERT_EQ(results.size(), kNumReplicas);
 
   EXPECT_TRUE(LiteralTestUtil::Equal(expected_outputs_[0], results[0]));
@@ -657,11 +731,12 @@ TEST_P(RaggedAllToAllTest,
                                                      /*replica_1=*/{3, 1}}));
 
   TF_ASSERT_OK_AND_ASSIGN(
-      std::vector<Literal> results,
+      ExecutionResult execution_result,
       ExecuteReplicated(std::move(module), GetInputLiteralPtrs(),
-                        /*device_assignment=*/nullptr,
                         /*num_replicas=*/kNumReplicas,
-                        /*run_hlo_passes=*/true));
+                        /*num_partitions=*/kNumPartitions));
+
+  const std::vector<Literal>& results = execution_result.results;
   ASSERT_EQ(results.size(), kNumReplicas);
   EXPECT_TRUE(LiteralTestUtil::Equal(expected_outputs_[0], results[0]));
   EXPECT_TRUE(LiteralTestUtil::Equal(expected_outputs_[1], results[1]));
@@ -705,11 +780,12 @@ TEST_P(RaggedAllToAllTest, RaggedAllToAll_8GPUs) {
   TF_ASSERT_OK(CreateRandomTestData(module.get(), input_sizes));
 
   TF_ASSERT_OK_AND_ASSIGN(
-      std::vector<Literal> results,
+      ExecutionResult execution_result,
       ExecuteReplicated(std::move(module), GetInputLiteralPtrs(),
-                        /*device_assignment=*/nullptr,
                         /*num_replicas=*/kNumReplicas,
-                        /*run_hlo_passes=*/true));
+                        /*num_partitions=*/kNumPartitions));
+
+  const std::vector<Literal>& results = execution_result.results;
   ASSERT_EQ(results.size(), kNumReplicas);
 
   for (int i = 0; i < kNumReplicas; ++i) {
@@ -756,11 +832,12 @@ TEST_P(RaggedAllToAllTest, RaggedAllToAll_8GPUs_2ReplicasPerGroups) {
   TF_ASSERT_OK(CreateRandomTestData(module.get(), input_sizes));
 
   TF_ASSERT_OK_AND_ASSIGN(
-      std::vector<Literal> results,
+      ExecutionResult execution_result,
       ExecuteReplicated(std::move(module), GetInputLiteralPtrs(),
-                        /*device_assignment=*/nullptr,
                         /*num_replicas=*/kNumReplicas,
-                        /*run_hlo_passes=*/true));
+                        /*num_partitions=*/kNumPartitions));
+
+  const std::vector<Literal>& results = execution_result.results;
   ASSERT_EQ(results.size(), kNumReplicas);
 
   for (int i = 0; i < kNumReplicas; ++i) {
@@ -807,11 +884,12 @@ TEST_P(RaggedAllToAllTest, RaggedAllToAll_8GPUs_4ReplicasPerGroups) {
   TF_ASSERT_OK(CreateRandomTestData(module.get(), input_sizes));
 
   TF_ASSERT_OK_AND_ASSIGN(
-      std::vector<Literal> results,
+      ExecutionResult execution_result,
       ExecuteReplicated(std::move(module), GetInputLiteralPtrs(),
-                        /*device_assignment=*/nullptr,
                         /*num_replicas=*/kNumReplicas,
-                        /*run_hlo_passes=*/true));
+                        /*num_partitions=*/kNumPartitions));
+
+  const std::vector<Literal>& results = execution_result.results;
   ASSERT_EQ(results.size(), kNumReplicas);
 
   for (int i = 0; i < kNumReplicas; ++i) {
@@ -824,8 +902,6 @@ std::string RaggedAllToAllImplTypeName(
   switch (ragged_all_to_all_impl_type) {
     case RaggedAllToAllImplType::kNccl:
       return "nccl";
-    case RaggedAllToAllImplType::kMemcpy:
-      return "memcpy";
     case RaggedAllToAllImplType::kDecomposer:
       return "decomposer";
     case RaggedAllToAllImplType::kOneShot:
@@ -839,7 +915,6 @@ INSTANTIATE_TEST_SUITE_P(
     RaggedAllToAllTest, RaggedAllToAllTest,
     ::testing::Combine(::testing::Bool(),
                        ::testing::Values(RaggedAllToAllImplType::kNccl,
-                                         RaggedAllToAllImplType::kMemcpy,
                                          RaggedAllToAllImplType::kDecomposer,
                                          RaggedAllToAllImplType::kOneShot)),
     [](const ::testing::TestParamInfo<std::tuple<bool, RaggedAllToAllImplType>>&
@@ -911,11 +986,12 @@ TEST_P(RaggedAllToAllMultiHostDecomposerTest, RaggedAllToAll_2GPUs_SliceSize1) {
   TF_ASSERT_OK(CreateRandomTestData(module.get(), input_sizes));
 
   TF_ASSERT_OK_AND_ASSIGN(
-      std::vector<Literal> results,
+      ExecutionResult execution_result,
       ExecuteReplicated(std::move(module), GetInputLiteralPtrs(),
-                        /*device_assignment=*/nullptr,
                         /*num_replicas=*/kNumReplicas,
-                        /*run_hlo_passes=*/true));
+                        /*num_partitions=*/kNumPartitions));
+
+  const std::vector<Literal>& results = execution_result.results;
   ASSERT_EQ(results.size(), kNumReplicas);
 
   for (int i = 0; i < kNumReplicas; ++i) {
@@ -968,11 +1044,12 @@ TEST_P(RaggedAllToAllMultiHostDecomposerTest, RaggedAllToAll_8GPUs_SliceSize4) {
   TF_ASSERT_OK(CreateRandomTestData(module.get(), input_sizes));
 
   TF_ASSERT_OK_AND_ASSIGN(
-      std::vector<Literal> results,
+      ExecutionResult execution_result,
       ExecuteReplicated(std::move(module), GetInputLiteralPtrs(),
-                        /*device_assignment=*/nullptr,
                         /*num_replicas=*/kNumReplicas,
-                        /*run_hlo_passes=*/true));
+                        /*num_partitions=*/kNumPartitions));
+
+  const std::vector<Literal>& results = execution_result.results;
   ASSERT_EQ(results.size(), kNumReplicas);
 
   for (int i = 0; i < kNumReplicas; ++i) {
@@ -1027,11 +1104,12 @@ TEST_P(RaggedAllToAllMultiHostDecomposerTest,
   TF_ASSERT_OK(CreateRandomTestData(module.get(), input_sizes));
 
   TF_ASSERT_OK_AND_ASSIGN(
-      std::vector<Literal> results,
+      ExecutionResult execution_result,
       ExecuteReplicated(std::move(module), GetInputLiteralPtrs(),
-                        /*device_assignment=*/nullptr,
                         /*num_replicas=*/kNumReplicas,
-                        /*run_hlo_passes=*/true));
+                        /*num_partitions=*/kNumPartitions));
+
+  const std::vector<Literal>& results = execution_result.results;
   ASSERT_EQ(results.size(), kNumReplicas);
 
   for (int i = 0; i < kNumReplicas; ++i) {
