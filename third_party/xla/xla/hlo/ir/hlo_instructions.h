@@ -685,16 +685,7 @@ class HloCollectiveInstruction : public HloChannelInstruction {
     return device_list_->replica_groups();
   }
 
-  const CollectiveDeviceListBase& device_list() const {
-    const CollectiveDeviceList* device_list_v1 =
-        dynamic_cast<const CollectiveDeviceList*>(device_list_.get());
-    // TODO(b/468442352): After XLA codebase is genericized to utilize
-    // CollectiveDeviceListBase instead of CollectiveDeviceList remove this
-    // check and return CollectiveDeviceListBase instead.
-    CHECK(device_list_v1 != nullptr)
-        << "Failed to cast device_list_ to CollectiveDeviceList";
-    return *device_list_v1;
-  }
+  const CollectiveDeviceListBase& device_list() const { return *device_list_; }
 
   // Returns true if the layout of the AllReduce is enforced by XLA client (as
   // the layout set in the shape). The only reason for the client to set the
@@ -1571,14 +1562,6 @@ class HloFusionInstruction : public HloCallableInstruction {
                                 absl::Span<HloInstruction* const> operands,
                                 HloComputation* fusion_computation,
                                 absl::string_view prefix = "");
-
-  ~HloFusionInstruction() override;
-
-  void ClearCalledComputations() override;
-
-  // When a fusion instruction is being destructed, clear the back pointer of
-  // its fusion computation, to avoid referencing freed memory.
-  void ClearFusionComputationInstruction();
 
   // Clones the given instruction_to_append and inserts the clone into this
   // callable instruction.

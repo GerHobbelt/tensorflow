@@ -102,7 +102,6 @@ limitations under the License.
 #include "xla/hlo/transforms/expanders/permutation_sort_expander.h"
 #include "xla/hlo/transforms/expanders/qr_expander.h"
 #include "xla/hlo/transforms/expanders/ragged_dot_rewriter.h"
-#include "xla/hlo/transforms/expanders/real_imag_expander.h"
 #include "xla/hlo/transforms/expanders/reduce_decomposer.h"
 #include "xla/hlo/transforms/expanders/reshape_decomposer.h"
 #include "xla/hlo/transforms/expanders/rng_bit_generator_expander.h"
@@ -766,7 +765,6 @@ absl::Status RunOptimizationPasses(
     pipeline.AddPass<ReshapeMover>(reshape_mover_options);
     pipeline.AddPass<HloConstantFolding>();
     pipeline.AddPass<ConditionalSimplifier>();
-    pipeline.AddPass<RealImagExpander>();
     // Do not fold transpose operands into dots yet. This can undo the normal
     // form established by DotDecomposer, which the DotMerger pass requires.
     pipeline.AddPass<TransposeFolding>(
@@ -1107,7 +1105,6 @@ absl::Status RunCollectiveOptimizationPasses(
 
 absl::Status RunLayoutAssignmentPasses(
     HloModule* hlo_module, se::GpuComputeCapability gpu_version,
-    se::dnn::VersionInfo dnn_version,
     const se::DeviceDescription& device_description) {
   // Run layout assignment in a separate pipeline from
   // "post-layout-assignment" because we want everything after layout
@@ -1121,7 +1118,7 @@ absl::Status RunLayoutAssignmentPasses(
   pipeline.AddPass<FlattenCallGraph>();
   ChannelLayoutConstraints layout_constraints;
   pipeline.AddPass<GpuLayoutAssignment>(
-      hlo_module->mutable_entry_computation_layout(), gpu_version, dnn_version,
+      hlo_module->mutable_entry_computation_layout(), gpu_version,
       device_description, &layout_constraints);
   // Run SubByteNormalization because GpuLayoutAssignment may modify a
   // Layout's element_size_in_bits field.
@@ -1556,8 +1553,8 @@ absl::Status GpuCompiler::OptimizeHloModule(
       hlo_module, gpu_version, dnn_version,
       device_description.runtime_version()));
 
-  RETURN_IF_ERROR(RunLayoutAssignmentPasses(hlo_module, gpu_version,
-                                            dnn_version, device_description));
+  RETURN_IF_ERROR(
+      RunLayoutAssignmentPasses(hlo_module, gpu_version, device_description));
   if (options.early_exit_with_layouts) {
     return absl::OkStatus();
   }
