@@ -194,10 +194,14 @@ cc_library(
     compatible_with = get_compatible_with_portable(),
     deps = [
         ":executable_metadata_proto_cc",
+        ":xla_executable_abi_version",
         "//xla/python/ifrt",
+        "//xla/python/ifrt:serdes",
         "//xla/python/ifrt:serdes_default_version_accessor",
         "//xla/python/ifrt:serdes_version",
+        "//xla/python/ifrt:serdes_week_4_old_version_accessor",
         "//xla/tsl/platform:errors",
+        "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
@@ -269,7 +273,7 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
         "@llvm-project//mlir:IR",
-        "@local_tsl//tsl/platform:protobuf",
+        "@tsl//tsl/platform:protobuf",
     ],
     alwayslink = True,
 )
@@ -471,8 +475,8 @@ cc_library(
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
-        "@local_tsl//tsl/platform:casts",
-        "@local_tsl//tsl/platform:protobuf",
+        "@tsl//tsl/platform:casts",
+        "@tsl//tsl/platform:protobuf",
     ],
 )
 

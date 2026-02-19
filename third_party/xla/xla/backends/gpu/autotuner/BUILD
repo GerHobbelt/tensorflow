@@ -537,7 +537,7 @@ cc_library(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/time",
         "@com_google_absl//absl/types:span",
-        "@local_tsl//tsl/platform:casts",
+        "@tsl//tsl/platform:casts",
     ],
 )
 
@@ -904,6 +904,7 @@ xla_test(
         ":custom_kernel",
         ":fission_backend",
         ":gpu_codegen_backend",
+        "//xla:autotune_results_proto_cc",
         "//xla:xla_proto_cc",
         "//xla/backends/autotuner:codegen_backend",
         "//xla/hlo/ir:hlo",
@@ -919,9 +920,9 @@ xla_test(
         "//xla/service/gpu/transforms:scaled_dot_rewriter",
         "//xla/stream_executor:device_description",
         "//xla/stream_executor:stream_executor_h",
-        "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/status:status_matchers",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest_main",
         "@llvm-project//mlir:IR",
     ],
@@ -988,7 +989,7 @@ xla_cc_test(
         "@com_google_absl//absl/status",
         "@com_google_googletest//:gtest_main",
         "@com_google_protobuf//:any_cc_proto",
-        "@local_tsl//tsl/platform:path",
+        "@tsl//tsl/platform:path",
     ],
 )
 
@@ -1033,7 +1034,7 @@ xla_cc_binary(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:string_view",
         "@llvm-project//mlir:IR",
-        "@local_tsl//tsl/platform:platform_port",
+        "@tsl//tsl/platform:platform_port",
     ] + if_cuda_is_configured([
         ":factory_cuda",
         "//xla/stream_executor/cuda:all_runtime",

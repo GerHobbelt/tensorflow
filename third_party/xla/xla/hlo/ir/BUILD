@@ -129,8 +129,8 @@ cc_library(
         "@com_google_absl//absl/types:span",
         "@com_google_protobuf//:protobuf_lite",
         "@llvm-project//llvm:Support",
-        "@local_tsl//tsl/platform:fingerprint",
-        "@local_tsl//tsl/platform:protobuf",
+        "@tsl//tsl/platform:fingerprint",
+        "@tsl//tsl/platform:protobuf",
     ],
 )
 
@@ -212,6 +212,7 @@ cc_library(
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
     ],
@@ -307,8 +308,8 @@ cc_library(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/synchronization",
         "@com_google_protobuf//:protobuf",
-        "@local_tsl//tsl/platform:human_readable_json",
-        "@local_tsl//tsl/platform:protobuf",
+        "@tsl//tsl/platform:human_readable_json",
+        "@tsl//tsl/platform:protobuf",
     ],
 )
 
@@ -449,6 +450,8 @@ xla_cc_test(
         ":named_sharding",
         ":tile_assignment",
         "//xla:xla_data_proto_cc",
+        "//xla/tsl/util/proto:parse_text_proto",
+        "//xla/tsl/util/proto:proto_matchers",
         "@com_google_googletest//:gtest_main",
     ],
 )
