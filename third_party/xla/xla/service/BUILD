@@ -232,13 +232,13 @@ xla_cc_test(
 )
 
 cc_library(
-    name = "all_reduce_reduce_scatter_reorder_cc",
+    name = "all_reduce_reduce_scatter_reorder",
     srcs = ["all_reduce_reduce_scatter_reorder.cc"],
     hdrs = ["all_reduce_reduce_scatter_reorder.h"],
     deps = [
         ":collective_ops_utils",
         "//xla/hlo/ir:hlo",
-        "//xla/hlo/pass:hlo_pass_interface",
+        "//xla/hlo/pass:hlo_pass",
         "//xla/tsl/platform:errors",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/status",
@@ -251,7 +251,7 @@ xla_cc_test(
     name = "all_reduce_reduce_scatter_reorder_test",
     srcs = ["all_reduce_reduce_scatter_reorder_test.cc"],
     deps = [
-        ":all_reduce_reduce_scatter_reorder_cc",
+        ":all_reduce_reduce_scatter_reorder",
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/testlib:hlo_hardware_independent_test_base",
@@ -5985,12 +5985,11 @@ xla_cc_test(
         "//xla:parse_flags_from_env",
         "//xla:xla_proto_cc",
         "//xla/tsl/lib/core:status_test_util",
+        "//xla/tsl/platform:env",
+        "//xla/tsl/platform:errors",
+        "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/status:status_matchers",
         "@com_google_googletest//:gtest_main",
-        "@local_tsl//tsl/platform:env",
-        "@local_tsl//tsl/platform:errors",
-        "@local_tsl//tsl/platform:status_matchers",
-        "@local_tsl//tsl/platform:statusor",
     ],
 )
 
