@@ -4656,9 +4656,9 @@ cc_library(
 )
 
 cc_library(
-    name = "hlo_runner",
-    srcs = ["hlo_runner.cc"],
-    hdrs = ["hlo_runner.h"],
+    name = "hlo_runner_legacy",
+    srcs = ["hlo_runner_legacy.cc"],
+    hdrs = ["hlo_runner_legacy.h"],
     deps = [
         ":backend",
         ":computation_layout",
@@ -4700,6 +4700,16 @@ cc_library(
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
         "@eigen_archive//:eigen3",
+    ],
+)
+
+cc_library(
+    name = "hlo_runner",
+    hdrs = ["hlo_runner.h"],
+    deps = [
+        ":hlo_runner_legacy",
+        "//xla/stream_executor:device_address_allocator",
+        "//xla/stream_executor:platform",
     ],
 )
 
@@ -6180,6 +6190,7 @@ xla_cc_test(
         "//xla/client:executable_build_options",
         "//xla/client:local_client",
         "//xla/hlo/ir:hlo",
+        "//xla/pjrt/proto:compile_options_proto_cc",
         "//xla/service/cpu:cpu_compiler",
         "//xla/service/gpu:backend_configs_cc",
         "//xla/tsl/lib/core:status_test_util",

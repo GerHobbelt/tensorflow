@@ -1872,6 +1872,7 @@ cc_library(
         "//xla/service/cpu:cpu_aot_compilation_result",
         "//xla/service/debug:unstable_reduction_detector",
         "//xla/service/gpu/autotuning:autotuner_cache",
+        "//xla/service/gpu/autotuning:autotuner_compile_util",
         "//xla/service/gpu/autotuning:autotuner_pass",
         "//xla/service/gpu/model:collective_ptable_stats_collection",
         "//xla/service/gpu/model:gpu_cost_model_stats_collection",
@@ -3341,7 +3342,6 @@ xla_test(
     tags = [
         "manual",
         "notap",
-        "pjrt_migration_candidate",
     ],
     use_legacy_runtime = True,
     deps = [
@@ -3358,7 +3358,6 @@ xla_test(
         "//xla/stream_executor:mock_stream_executor",
         "//xla/stream_executor:platform",
         "//xla/stream_executor:stream_executor_h",
-        "//xla/tests:hlo_test_base",
         "//xla/tests:literal_test_util",
         "//xla/tests:test_utils",
         "//xla/tsl/lib/core:status_test_util",
@@ -3512,6 +3511,7 @@ xla_cc_test(
     srcs = ["ptx_compile_options_from_debug_options_test.cc"],
     deps = [
         ":ptx_compile_options_from_debug_options",
+        "//xla:debug_options_flags",
         "//xla:xla_proto_cc",
         "//xla/stream_executor/cuda:compilation_options",
         "@com_google_googletest//:gtest_main",
