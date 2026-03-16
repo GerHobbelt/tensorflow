@@ -764,6 +764,7 @@ cc_library(
         "//xla/tsl/platform:status_macros",
         "//xla/util/split_proto:split_executable_and_options_writer",
         "//xla/util/split_proto:split_gpu_executable_writer",
+        "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/base:no_destructor",
         "@com_google_absl//absl/base:nullability",
@@ -3528,6 +3529,7 @@ xla_cc_test(
     srcs = ["flag_utils_test.cc"],
     deps = [
         ":flag_utils",
+        "//xla:debug_options_flags",
         "//xla:xla_proto_cc",
         "//xla/backends/gpu/transforms:double_buffer_loop_unrolling",
         "//xla/hlo/ir:hlo",
