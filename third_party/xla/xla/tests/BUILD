@@ -557,7 +557,6 @@ xla_test(
 
 xla_test(
     name = "conv_depthwise_test",
-    timeout = "long",
     srcs = [
         "conv_depthwise_test.cc",
     ],
@@ -1417,7 +1416,6 @@ xla_test(
 
 xla_test(
     name = "convolution_test",
-    timeout = "long",
     srcs = ["convolution_test.cc"],
     shard_count = 50,
     tags = [
@@ -1453,18 +1451,14 @@ xla_test(
 
 xla_test(
     name = "convolution_1d_test",
-    timeout = "long",
     srcs = ["convolution_test_1d.cc"],
     # Turn on logging so that VLOG statements don't appear uncovered to zapfhahn.
-    args = ["--vmodule=convolution_emitter=7"],
-    # In the open source build, convolution_test_1d_gpu fails because it doesn't
-    # recognize --vmodule.
-    disabled_backends = [
-        "cpu",
-        "gpu",
-    ],
+    args = if_google(["--vmodule=convolution_emitter=7"]),
     shard_count = 40,
-    tags = ["optonly"],
+    tags = [
+        "cuda-only",
+        "optonly",
+    ],
     deps = [
         ":client_library_test_runner_mixin",
         ":hlo_pjrt_interpreter_reference_mixin",
@@ -1484,44 +1478,11 @@ xla_test(
     ],
 )
 
-xla_test(
-    name = "convolution_1d_no_vmodule_test",
-    timeout = "long",
-    srcs = ["convolution_test_1d.cc"],
-    backends = [
-        "cpu",
-        "gpu",
-    ],
-    shard_count = 50,
-    tags = [
-        "cuda-only",
-        "optonly",
-    ],
-    deps = [
-        ":client_library_test_runner_mixin",
-        ":hlo_pjrt_interpreter_reference_mixin",
-        ":hlo_pjrt_test_base",
-        ":xla_internal_test_main",  # fixdeps: keep
-        "//xla:array3d",
-        "//xla:error_spec",
-        "//xla:literal",
-        "//xla:literal_util",
-        "//xla:shape_util",
-        "//xla:xla_data_proto_cc",
-        "//xla/hlo/builder:padding",
-        "//xla/hlo/builder:xla_builder",
-        "//xla/tests:xla_test_backend_predicates",
-        "//xla/tsl/platform:test",
-        "@eigen_archive//:eigen3",
-    ],
-)
-
 # Run convolution tests with auto-tuning disabled.  This just does a basic
 # sanity check that setting xla_gpu_autotune_level to 0 does not break simple
 # graphs.
 xla_test(
     name = "convolution_autotune_disabled_test",
-    timeout = "long",
     srcs = ["convolution_test.cc"],
     args = ["--xla_gpu_autotune_level=0"],
     backends = ["gpu"],
@@ -1555,7 +1516,6 @@ xla_test(
 
 xla_test(
     name = "convolution_1d_autotune_disabled_test",
-    timeout = "long",
     srcs = ["convolution_test_1d.cc"],
     args = ["--xla_gpu_autotune_level=0"],
     backends = ["gpu"],
@@ -1582,7 +1542,6 @@ xla_test(
 
 xla_test(
     name = "convolution_gpu_alternative_layout_test",
-    timeout = "long",
     srcs = ["convolution_test.cc"],
     backend_args = {"gpu": ["--xla_backend_extra_options=xla_gpu_experimental_conv_disable_layout_heuristic"]},
     backends = ["gpu"],
@@ -1615,7 +1574,6 @@ xla_test(
 
 xla_test(
     name = "convolution_1d_gpu_alternative_layout_test",
-    timeout = "long",
     srcs = ["convolution_test_1d.cc"],
     backend_args = {"gpu": ["--xla_backend_extra_options=xla_gpu_experimental_conv_disable_layout_heuristic"]},
     backends = ["gpu"],
@@ -1642,12 +1600,7 @@ xla_test(
 
 xla_test(
     name = "convolution_variants_test",
-    timeout = "long",
     srcs = ["convolution_variants_test.cc"],
-    backend_tags = {
-        # TODO(b/31436974): Fix msan failure. Failed on 2016-09-12.
-        "cpu": ["nomsan"],
-    },
     shard_count = 30,
     deps = [
         ":client_library_test_runner_mixin",
@@ -1671,7 +1624,6 @@ xla_test(
 
 xla_test(
     name = "convolution_dimension_numbers_test",
-    timeout = "long",
     srcs = ["convolution_dimension_numbers_test.cc"],
     shard_count = 4,
     deps = [
@@ -1696,7 +1648,6 @@ xla_test(
 
 xla_test(
     name = "convolution_cudnn_test",
-    timeout = "long",
     srcs = ["convolution_cudnn_test.cc"],
     backends = [
         "v100",
@@ -3271,7 +3222,6 @@ xla_test(
         "@com_google_googletest//:gtest_main",
         "@llvm-project//llvm:Core",
         "@tsl//tsl/platform:casts",
-        "@tsl//tsl/platform:env",
         "@tsl//tsl/platform:test",
     ],
 )
@@ -3470,16 +3420,18 @@ xla_cc_test(
 xla_test(
     name = "round_trip_transfer_test",
     srcs = ["round_trip_transfer_test.cc"],
-    tags = ["pjrt_migration_candidate"],
     use_legacy_runtime = True,
     deps = [
-        ":client_library_test_base",
         ":literal_test_util",
+        ":local_client_test_base",
         ":xla_internal_test_main",
+        "//xla:array2d",
         "//xla:array4d",
         "//xla:literal",
-        "//xla/client:local_client",
+        "//xla:literal_util",
+        "//xla/service",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_googletest//:gtest",
         "@tsl//tsl/platform:test",
     ],
 )
@@ -3618,10 +3570,14 @@ xla_test(
         ":local_client_test_base",
         ":test_utils",
         ":xla_internal_test_main",
+        "//xla:literal",
         "//xla:shape_util",
         "//xla/hlo/builder:xla_builder",
+        "//xla/hlo/ir:hlo",
         "//xla/hlo/parser:hlo_parser",
         "//xla/tsl/lib/core:status_test_util",
+        "//xla/tsl/platform:statusor",
+        "//xla/tsl/platform:test",
         "@com_google_absl//absl/base",
         "@com_google_absl//absl/container:flat_hash_set",
     ],
@@ -3982,6 +3938,7 @@ cc_library(
             "tests:__pkg__",
             "tools:__pkg__",
         ]) + [
+            "//xla/codegen/intrinsic/accuracy:__pkg__",
             "//xla/tests/exhaustive:__pkg__",
         ],
         ["//visibility:public"],
