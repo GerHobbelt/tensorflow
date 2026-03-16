@@ -24,6 +24,8 @@ limitations under the License.
 #include "mlir/Pass/PassOptions.h"
 #include "mlir/Pass/PassRegistry.h"
 #include "mlir/Support/LLVM.h"
+#include "mlir/Transforms/GreedyPatternRewriteDriver.h"
+#include "mlir/Transforms/Passes.h"
 #include "shardy/dialect/sdy/transforms/import/passes.h"
 #include "xla/service/hlo.pb.h"
 #include "xla/service/spmd/shardy/round_trip_common/import_func_calls.h"
@@ -67,7 +69,8 @@ void addSdyRoundTripExportPipeline(mlir::OpPassManager& pm,
 void addSdyRoundTripImportPipeline(mlir::OpPassManager& pm,
                                    bool enableConstantImport,
                                    bool liftAndDedupMeshes,
-                                   bool enableHloShardingV3) {
+                                   bool enableHloShardingV3,
+                                   bool enableNativeNonFlatSupport) {
   addCommonPreImportPasses(pm, enableConstantImport);
   pm.addPass(createSdyRoundTripImportShardyAttrsPass(enableHloShardingV3));
   pm.addPass(createSdyRoundTripFlattenCallGraphPass());
@@ -84,6 +87,12 @@ void addSdyRoundTripImportPipeline(mlir::OpPassManager& pm,
     pm.addPass(mlir::sdy::createLiftInlinedMeshesPass());
     pm.addPass(createSdyRoundTripDedupMeshesPass());
   }
+  pm.addPass(createCanonicalizerPass(
+      mlir::GreedyRewriteConfig()
+          .setUseTopDownTraversal(true)
+          .setRegionSimplificationLevel(mlir::GreedySimplifyRegionLevel::Normal)
+          .enableFolding(false)
+          .enableConstantCSE(false)));
   pm.addPass(createImportFuncCallsPass());
 }
 
