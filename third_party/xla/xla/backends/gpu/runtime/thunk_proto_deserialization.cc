@@ -58,6 +58,8 @@ limitations under the License.
 #include "xla/backends/gpu/runtime/kernel_thunk.h"
 #include "xla/backends/gpu/runtime/memset_thunk.h"
 #include "xla/backends/gpu/runtime/norm_thunk.h"
+#include "xla/backends/gpu/runtime/nvshmem_collective_permute_thunk.h"
+#include "xla/backends/gpu/runtime/nvshmem_collective_thunk.h"
 #include "xla/backends/gpu/runtime/outfeed_thunk.h"
 #include "xla/backends/gpu/runtime/ragged_all_to_all_thunk.h"
 #include "xla/backends/gpu/runtime/recv_thunk.h"
@@ -309,6 +311,15 @@ absl::StatusOr<std::unique_ptr<Thunk>> DeserializeThunkProtoImpl(
       return CollectiveGroupThunk::FromProto(
           std::move(thunk_info), thunk_proto.collective_group_thunk(),
           buffer_allocations, collective_async_events_map, deserializer);
+    case ThunkProto::kNvshmemCollectiveDoneThunk:
+      return NvshmemCollectiveDoneThunk::FromProto(
+          std::move(thunk_info), thunk_proto.nvshmem_collective_done_thunk(),
+          collective_async_events_map);
+    case ThunkProto::kNvshmemCollectivePermuteDoneThunk:
+      return NvshmemCollectivePermuteDoneThunk::FromProto(
+          std::move(thunk_info),
+          thunk_proto.nvshmem_collective_permute_done_thunk(),
+          collective_async_events_map);
     default:
       std::optional<absl::string_view> unsupported_thunk_type =
           GetStoredThunkTypeName(thunk_proto);

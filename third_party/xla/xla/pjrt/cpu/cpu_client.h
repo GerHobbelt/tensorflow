@@ -140,6 +140,9 @@ class PjRtCpuClient final : public CommonPjRtClient {
                            std::shared_ptr<DeviceAssignment>>>
   CompileAndAssignDevices(mlir::ModuleOp module, CompileOptions options);
 
+  using PjRtClient::Compile;
+  using PjRtClient::CompileAndLoad;
+
   absl::StatusOr<std::unique_ptr<PjRtExecutable>> Compile(
       const XlaComputation& computation, CompileOptions options) override;
   absl::StatusOr<std::unique_ptr<PjRtExecutable>> Compile(
@@ -151,7 +154,7 @@ class PjRtCpuClient final : public CommonPjRtClient {
       mlir::ModuleOp module, CompileOptions options) override;
 
   absl::StatusOr<std::unique_ptr<PjRtLoadedExecutable>> Load(
-      std::unique_ptr<PjRtExecutable> executable,
+      std::shared_ptr<PjRtExecutable> executable,
       const LoadOptions& load_options) override;
 
   // TODO(b/403584258): PJRT wants to have just one simple Compile API. When the

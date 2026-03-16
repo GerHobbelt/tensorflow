@@ -1948,13 +1948,10 @@ absl::Status GpuCompiler::OptimizeHloPostLayoutAssignment(
   // GemmFusionAutotuner runs hoist-fused-bitcasts and nest-gemm-fusion,
   // matching its behavior here.
   pipeline.AddPass<HoistFusedBitcasts>();
-  if (debug_options.xla_gpu_unsupported_disable_nested_gemm_fusions()) {
-    pipeline.AddPass<ConvertTritonGemmConfig>(
-        gpu_target_config.device_description, &mlir_context_);
-  } else {
-    pipeline.AddPass<NestGemmFusion>(gpu_target_config.device_description,
-                                     &mlir_context_);
-  }
+  pipeline.AddPass<ConvertTritonGemmConfig>(
+      gpu_target_config.device_description, &mlir_context_);
+  pipeline.AddPass<NestGemmFusion>(gpu_target_config.device_description,
+                                   &mlir_context_);
 
   // Clean up new_tuple described above.
   pipeline.AddPass<TupleSimplifier>();
@@ -2354,7 +2351,7 @@ absl::StatusOr<GpuCompiler::BackendCompileResult> GpuCompiler::CompileAndLink(
     const se::DeviceDescription& device_description,
     const CompileOptions& options, const HloModule* debug_module) {
   tsl::profiler::TraceMe traceme("CompileAndLink");
-  llvm::Module* llvm_module = &*compile_module_results.llvm_module;
+  llvm::Module* llvm_module = &*compile_module_results.llvm_modules[0].get();
 
   bool force_module_split =
       module_config.debug_options().xla_llvm_force_inline_before_split();
@@ -2631,25 +2628,33 @@ GpuCompiler::CompileToBackendResult(
         CompileModuleToLlvmIr(
             module, llvm_context, target_triple_, data_layout_, PlatformId(),
             gpu_device_info, alias_info.get(),
-            std::move(buffer_size_bytes_function), llvm_options_lock,
-            /*split_constants_module=*/can_use_link_modules));
+            std::move(buffer_size_bytes_function), llvm_options_lock));
   }
 
-  if (user_pre_optimization_hook_) {
-    user_pre_optimization_hook_(*compile_module_results.llvm_module);
-    if (compile_module_results.llvm_module_constants != nullptr) {
-      user_pre_optimization_hook_(
-          *compile_module_results.llvm_module_constants);
+  for (const std::unique_ptr<llvm::Module>& llvm_module :
+       compile_module_results.llvm_modules) {
+    llvm_ir::DumpIrIfEnabled(*module, *llvm_module,
+                             /*optimized=*/false);
+    if (user_pre_optimization_hook_) {
+      user_pre_optimization_hook_(*llvm_module);
     }
   }
-
-  llvm_ir::DumpIrIfEnabled(*module, *compile_module_results.llvm_module,
-                           /*optimized=*/false);
   if (compile_module_results.llvm_module_constants != nullptr) {
     llvm_ir::DumpIrIfEnabled(*module,
                              *compile_module_results.llvm_module_constants,
                              /*optimized=*/false, "constants");
+    if (user_pre_optimization_hook_) {
+      user_pre_optimization_hook_(
+          *compile_module_results.llvm_module_constants);
+    }
+
+    if (!can_use_link_modules) {
+      compile_module_results.llvm_modules.push_back(
+          std::move(compile_module_results.llvm_module_constants));
+    }
   }
+
+  LinkLlvmModulesInPlace(compile_module_results.llvm_modules);
 
   BackendCompileResult backend_result;
   // Disable multi-threading during deviceless AOT compilation.
@@ -2662,16 +2667,16 @@ GpuCompiler::CompileToBackendResult(
   } else {
     if (compile_module_results.llvm_module_constants) {
       std::vector<std::unique_ptr<llvm::Module>> modules;
-      modules.push_back(std::move(compile_module_results.llvm_module));
+      modules.push_back(std::move(compile_module_results.llvm_modules[0]));
       modules.push_back(
           std::move(compile_module_results.llvm_module_constants));
       LinkLlvmModulesInPlace(modules);
-      compile_module_results.llvm_module = std::move(modules[0]);
+      compile_module_results.llvm_modules[0] = std::move(modules[0]);
     }
     ASSIGN_OR_RETURN(
         backend_result,
         CompileSingleModule(module->config(), gpu_device_info, module,
-                            &*compile_module_results.llvm_module,
+                            &*compile_module_results.llvm_modules[0],
                             /*relocatable=*/false, options,
                             /*shard_number=*/std::nullopt));
   }
@@ -2811,7 +2816,7 @@ absl::StatusOr<std::unique_ptr<Executable>> GpuCompiler::RunBackend(
 
   if (embed_ir_in_executable) {
     std::string ir_module_string_before_opt =
-        llvm_ir::DumpToString(res.compile_module_results.llvm_module.get());
+        llvm_ir::DumpToString(res.compile_module_results.llvm_modules[0].get());
     gpu_executable->set_ir_module_string(ir_module_string_before_opt);
     DCHECK_NE("", ir_module_string_before_opt);
   }
