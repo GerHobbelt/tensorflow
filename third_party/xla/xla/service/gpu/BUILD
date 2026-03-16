@@ -799,7 +799,6 @@ tf_proto_library(
         "//xla/backends/gpu/runtime:thunk_proto",
         "//xla/service:hlo_proto",
         "//xla/stream_executor:device_description_proto",
-        "//xla/stream_executor/cuda:cuda_compute_capability_proto",
     ],
 )
 
@@ -3570,8 +3569,6 @@ cc_library(
     deps = [
         ":gpu_compiler",
         ":target_constants",
-        "//xla:debug_options_flags",
-        "//xla/hlo/analysis:hlo_dataflow_analysis",
         "//xla/hlo/ir:hlo",
         "//xla/service:dump",
         "//xla/service/gpu/llvm_gpu_backend:spirv_backend",
