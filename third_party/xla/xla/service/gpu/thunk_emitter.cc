@@ -78,6 +78,7 @@ limitations under the License.
 #include "xla/backends/gpu/runtime/convolution_thunk.h"
 #include "xla/backends/gpu/runtime/copy_done_thunk.h"
 #include "xla/backends/gpu/runtime/copy_thunk.h"
+#include "xla/backends/gpu/runtime/cub_scan_thunk.h"
 #include "xla/backends/gpu/runtime/cub_sort_thunk.h"
 #include "xla/backends/gpu/runtime/cudnn_thunk.h"
 #include "xla/backends/gpu/runtime/custom_call_thunk.h"
@@ -859,6 +860,30 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitCubDeviceRadixSort(
   return GetThunkSequence(std::move(thunk));
 }
 
+absl::StatusOr<ThunkSequence> ThunkEmitter::EmitCubDeviceScan(
+    const HloCustomCallInstruction* instr) {
+  absl::InlinedVector<ShapedSlice, 2> results;
+  TF_ASSIGN_OR_RETURN(ShapedSlice result, GetShapedSliceForHlo(instr, {0}));
+  results.push_back(result);
+
+  TF_ASSIGN_OR_RETURN(BufferAllocation::Slice scratch,
+                      GetAllocationSliceForHlo(instr, {1}));
+  TF_ASSIGN_OR_RETURN(BufferAllocation::Slice input,
+                      GetAllocationSliceForHlo(instr->operand(0), {}));
+
+  const Shape& operand_shape = instr->operand(0)->shape();
+  int64_t num_elements = Product(operand_shape.dimensions());
+
+  TF_ASSIGN_OR_RETURN(
+      std::unique_ptr<CubScanThunk> thunk,
+      CubScanThunk::Create(Thunk::ThunkInfo::WithProfileAnnotation(
+                               instr, ir_emitter_context_->GetNextThunkId()),
+                           operand_shape.element_type(), input, result.slice,
+                           scratch, num_elements));
+
+  return GetThunkSequence(std::move(thunk));
+}
+
 absl::StatusOr<ThunkSequence> ThunkEmitter::EmitCustomCallThunk(
     const HloCustomCallInstruction* instr) {
   const std::string& call_target_name = instr->custom_call_target();
@@ -1218,7 +1243,8 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitTritonCustomCall(
 
     kernel_modules_.push_back(std::move(result.llvm_module));
     return {{kernel_name, launch_dimensions, /*cluster_dim=*/std::nullopt,
-             result.shmem_bytes}};
+             result.shmem_bytes, /*binary=*/"", /*tma_metadata=*/{},
+             result.use_pdl}};
   };
 
   auto [status_or_entry, was_cached] =
@@ -1240,7 +1266,7 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitTritonCustomCall(
           instr, ir_emitter_context_->GetNextThunkId()),
       entry->kernel_name, kernel_arguments, entry->launch_dimensions,
       /*cluster_dim=*/std::nullopt, entry->shmem_bytes, entry->tma_metadata,
-      /*zeroed_output_buffer_indices=*/call.zeroed_outputs));
+      /*zeroed_output_buffer_indices=*/call.zeroed_outputs, entry->use_pdl));
 }
 
 absl::StatusOr<ThunkSequence> ThunkEmitter::EmitAsyncComputation(
@@ -2519,6 +2545,9 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitCustomCallSwitch(
   }
   if (IsCubDeviceRadixSort(*hlo)) {
     return EmitCubDeviceRadixSort(custom_call);
+  }
+  if (IsCubDeviceScan(*hlo)) {
+    return EmitCubDeviceScan(custom_call);
   }
   if (custom_call->custom_call_target() == "PadToStatic") {
     return EmitPadToStatic(custom_call);

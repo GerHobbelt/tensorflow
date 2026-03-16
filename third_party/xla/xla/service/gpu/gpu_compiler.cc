@@ -132,6 +132,7 @@ limitations under the License.
 #include "xla/backends/gpu/transforms/sanitize_constant_names.h"
 #include "xla/backends/gpu/transforms/scalar_constant_sinker.h"
 #include "xla/backends/gpu/transforms/scaled_dot_rewriter.h"
+#include "xla/backends/gpu/transforms/scan_rewriter.h"
 #include "xla/backends/gpu/transforms/scatter_expander.h"
 #include "xla/backends/gpu/transforms/scatter_slice_simplifier.h"
 #include "xla/backends/gpu/transforms/softmax_rewriter_triton.h"
@@ -400,16 +401,10 @@ DeviceOrDevicelessConfig GetDeviceConfig(
       DevicelessConfig{gpu_target_config.device_description}};
 }
 
-bool IsDevicelessCompilation(const Compiler::CompileOptions& options,
-                             const se::StreamExecutor* stream_exec) {
-  return options.early_exit_with_layouts || stream_exec == nullptr;
-}
-
 absl::StatusOr<int> GetNumVisibleDevices(
     const Compiler::CompileOptions& options,
     const se::StreamExecutor* stream_exec, se::Platform::Id platform_id) {
-  if (IsDevicelessCompilation(options, stream_exec) &&
-      options.gpu_topology.has_value()) {
+  if (options.gpu_topology.has_value()) {
     return options.gpu_topology->num_devices_per_host();
   }
 
@@ -522,6 +517,7 @@ absl::Status RunPreSPMDPartitionerPasses(HloModule* hlo_module,
   pre_spmd_pipeline.AddPass<CuDnnCustomCallConverter>();
   pre_spmd_pipeline.AddPass<CompositeRewriter>();
   pre_spmd_pipeline.AddPass<ConvertMemoryPlacementToInternalAnnotations>();
+  pre_spmd_pipeline.AddPass<ScanRewriter>();
   pre_spmd_pipeline.AddPass<ScanExpander>();
   pre_spmd_pipeline.AddPass<FlattenCallGraph>();
   pre_spmd_pipeline.AddPass<CallInliner>(
@@ -2043,7 +2039,7 @@ absl::Status GpuCompiler::OptimizeHloPostLayoutAssignment(
     }
     return target_config;
   }
-  return absl::InternalError(
+  return absl::InvalidArgumentError(
       "Either GPU has to be attached, or --xla_gpu_target_config_filename "
       "has to be specified to specify the target to compile for.");
 }
@@ -2058,9 +2054,6 @@ absl::StatusOr<std::unique_ptr<HloModule>> GpuCompiler::RunHloPasses(
 
   const DebugOptions debug_opts = module->config().debug_options();
   RETURN_IF_ERROR(LoadAutotuneResultsFromFile(debug_opts));
-  bool is_deviceless = options.early_exit_with_layouts ||
-                       options.gpu_topology.has_value() ||
-                       !debug_opts.xla_gpu_target_config_filename().empty();
 
   std::unique_ptr<CompilationStats> compilation_stats;
 
@@ -2087,9 +2080,9 @@ absl::StatusOr<std::unique_ptr<HloModule>> GpuCompiler::RunHloPasses(
   const se::DeviceDescription& device_description =
       gpu_target_config.device_description;
   std::unique_ptr<GpuAliasInfo> alias_info = GetAliasInfo(device_description);
-  RETURN_IF_ERROR(OptimizeHloModule(
-      module.get(), is_deviceless ? nullptr : stream_exec, options,
-      gpu_target_config, alias_info.get(), compilation_stats.get()));
+  RETURN_IF_ERROR(OptimizeHloModule(module.get(), stream_exec, options,
+                                    gpu_target_config, alias_info.get(),
+                                    compilation_stats.get()));
   if (options.early_exit_with_layouts) {
     return std::move(module);
   }
@@ -2106,7 +2099,7 @@ absl::StatusOr<std::unique_ptr<HloModule>> GpuCompiler::RunHloPasses(
   DumpHloModuleMetadataIfEnabled(module.get());
 
   AutotuneResults autotune_results;
-  if (!is_deviceless) {
+  if (stream_exec != nullptr) {
     RETURN_IF_ERROR(
         AutotunerCache::SerializeAutotuneResults(&autotune_results));
     RETURN_IF_ERROR(SerializeAutotuneResultsToFile(debug_opts));

@@ -51,8 +51,6 @@ filegroup(
     ]),
 )
 
-exports_files(srcs = ["gpu_compiler_test_autotune_db.textproto"])
-
 tf_proto_library(
     name = "backend_configs",
     srcs = ["backend_configs.proto"],
@@ -502,6 +500,7 @@ cc_library(
         "//xla/backends/gpu/runtime:convolution_thunk",
         "//xla/backends/gpu/runtime:copy_done_thunk",
         "//xla/backends/gpu/runtime:copy_thunk",
+        "//xla/backends/gpu/runtime:cub_scan_thunk",
         "//xla/backends/gpu/runtime:cub_sort_thunk",
         "//xla/backends/gpu/runtime:cudnn_thunk",
         "//xla/backends/gpu/runtime:custom_call_target",
@@ -1708,6 +1707,7 @@ cc_library(
         "//xla/backends/gpu/transforms:sanitize_constant_names",
         "//xla/backends/gpu/transforms:scalar_constant_sinker",
         "//xla/backends/gpu/transforms:scaled_dot_rewriter",
+        "//xla/backends/gpu/transforms:scan_rewriter",
         "//xla/backends/gpu/transforms:scatter_expander",
         "//xla/backends/gpu/transforms:scatter_slice_simplifier",
         "//xla/backends/gpu/transforms:softmax_rewriter_triton",
@@ -1961,7 +1961,6 @@ xla_test(
         ],
     },
     backends = ["gpu"],
-    data = ["gpu_compiler_test_autotune_db.textproto"],
     shard_count = 2,
     deps = [
         ":alias_info",
@@ -2061,8 +2060,8 @@ xla_test(
         "//xla/service:executable",
         "//xla/service:gpu_topology",
         "//xla/service:hlo_module_config",
-        "//xla/service:hlo_runner",
         "//xla/service:hlo_runner_interface",
+        "//xla/service:hlo_runner_legacy",
         "//xla/service:platform_util",
         "//xla/service/gpu/tests:hlo_legacy_gpu_test_base",
         "//xla/service/llvm_ir:llvm_command_line_options",
@@ -2491,6 +2490,34 @@ xla_cc_test(
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:IR",
         "@tsl//tsl/platform:statusor",
+    ],
+)
+
+xla_test(
+    name = "gb200_cross_compilation_test",
+    srcs = [
+        "gb200_cross_compilation_test.cc",
+    ],
+    backends = ["gb200"],
+    deps = [
+        ":gpu_executable_proto_cc",
+        "//xla/backends/gpu/target_config",
+        "//xla/hlo/ir:hlo",
+        "//xla/service:compiled_module",
+        "//xla/service:compiler",
+        "//xla/service:gpu_topology",
+        "//xla/service:platform_util",
+        "//xla/service/gpu/autotuning:autotuner_cache",
+        "//xla/stream_executor:platform",
+        "//xla/stream_executor:platform_manager",
+        "//xla/stream_executor:stream_executor_h",
+        "//xla/tests:hlo_pjrt_test_base",
+        "//xla/tests:xla_internal_test_main",
+        "//xla/tsl/platform:status_macros",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_googletest//:gtest",
     ],
 )
 
