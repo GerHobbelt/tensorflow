@@ -521,7 +521,7 @@ void HloSharding::Print(Printer* printer, bool include_metadata) const {
     return;
   }
 
-  if (maximal_) {
+  if (single_device_) {
     AppendCat(printer, "{maximal device=",
               static_cast<int64_t>(*tile_assignment_.array().begin()));
     print_shard_group();
@@ -584,7 +584,8 @@ bool HloSharding::UsesDevice(int64_t device) const {
 }
 
 std::vector<int64_t> HloSharding::TileIndexForDevice(int64_t device) const {
-  CHECK(!maximal_);
+  CHECK(!replicated_);
+  CHECK(!single_device_);
   CHECK(!IsManual());
   CHECK(!IsUnknown());
   CHECK(!IsTuple());
@@ -605,7 +606,7 @@ std::vector<int64_t> HloSharding::TileOffsetForDevice(const Shape& shape,
   CHECK(!IsManual());
   CHECK(!IsUnknown());
 
-  if (maximal_) {
+  if (replicated_ || single_device_) {
     return std::vector<int64_t>(shape.dimensions().size(), 0);
   }
   CHECK_EQ(shape.dimensions().size(), TiledDataRank());
@@ -624,7 +625,7 @@ std::vector<int64_t> HloSharding::TileLimitForDevice(const Shape& shape,
   CHECK(!IsManual());
   CHECK(!IsUnknown());
 
-  if (maximal_) {
+  if (replicated_ || single_device_) {
     return std::vector<int64_t>(shape.dimensions().begin(),
                                 shape.dimensions().end());
   }
@@ -656,7 +657,8 @@ absl::Status HloSharding::EachTile(
   CHECK(!IsTuple());
   CHECK(!IsManual());
   CHECK(!IsUnknown());
-  CHECK(!maximal_);
+  CHECK(!replicated_);
+  CHECK(!single_device_);
 
   // At the high-level, sharding_dims[i] describes the number of ways the shape
   // is partitioned along i-th dimension. Note that sharding_dims[i] with i >=
@@ -787,7 +789,7 @@ std::optional<int64_t> HloSharding::UniqueDevice() const {
     return unique_device;
   }
 
-  if (!IsReplicatedLeaf() && IsTileMaximalLeaf()) {
+  if (IsSingleDeviceLeaf()) {
     return static_cast<int64_t>(
         *TileAgnosticDeviceAssignment().array().begin());
   }
@@ -870,11 +872,11 @@ absl::Status HloSharding::ValidateNonTuple(
     return absl::OkStatus();
   }
 
-  if (IsTileMaximalLeaf()) {
+  if (IsSingleDeviceLeaf()) {
     CHECK(!TileAgnosticDeviceAssignment().iota_);
     if (TileAgnosticDeviceAssignment().array().num_elements() != 1) {
       return absl::InvalidArgumentError(
-          "Tile maximal sharding must have a single device assignment.");
+          "SingleDevice sharding must have a single device assignment.");
     }
     return DeviceInRange(TileAgnosticDeviceAssignment().first(), num_devices);
   }
@@ -1115,7 +1117,7 @@ OpSharding HloSharding::ToProto() const {
 
   if (IsReplicated()) {
     result.set_type(OpSharding::REPLICATED);
-  } else if (IsTileMaximal()) {
+  } else if (IsSingleDevice()) {
     result.set_type(OpSharding::MAXIMAL);
   } else if (IsManual()) {
     result.set_type(OpSharding::MANUAL);
@@ -1168,7 +1170,7 @@ OpSharding HloSharding::ToProto() const {
   if (sharding.IsReplicated()) {
     return NamedSharding::Replicate(sharding.metadata());
   }
-  if (sharding.IsTileMaximal()) {
+  if (sharding.IsSingleDevice()) {
     return NamedSharding::MaximalSharding(sharding.tile_assignment().first(),
                                           sharding.metadata());
   }
@@ -1360,7 +1362,7 @@ OpSharding HloSharding::ToProto() const {
 }
 
 Shape HloSharding::TileShape(const Shape& shape) const {
-  if (IsTileMaximal() || IsManual() || IsUnreduced() || IsUnknown()) {
+  if (!IsTiled()) {
     return shape;
   }
   Shape result_shape = shape;
@@ -1372,7 +1374,7 @@ Shape HloSharding::TileShape(const Shape& shape) const {
 }
 
 Shape HloSharding::TileShape(const Shape& shape, int64_t device) const {
-  if (IsTileMaximal() || IsManual() || IsUnreduced() || IsUnknown()) {
+  if (!IsTiled()) {
     return shape;
   }
 
@@ -1390,7 +1392,7 @@ Shape HloSharding::TileShape(const Shape& shape, int64_t device) const {
 }
 
 int64_t HloSharding::TotalNumTiles() const {
-  if (IsTileMaximal()) {
+  if (IsReplicatedOrSingleDevice()) {
     return 1;
   }
   CHECK(!IsManual());
@@ -1399,7 +1401,7 @@ int64_t HloSharding::TotalNumTiles() const {
 }
 
 int64_t HloSharding::NumTiles() const {
-  if (IsTileMaximalLeaf()) {
+  if (IsReplicatedOrSingleDeviceLeaf()) {
     return 1;
   }
   CHECK(!IsManualLeaf() && !IsUnknownLeaf());
@@ -1407,7 +1409,7 @@ int64_t HloSharding::NumTiles() const {
 }
 
 int64_t HloSharding::NumTiles(absl::Span<const int64_t> dims) const {
-  if (IsTileMaximal()) {
+  if (IsReplicatedOrSingleDevice()) {
     return 1;
   }
   CHECK(!IsManual());
