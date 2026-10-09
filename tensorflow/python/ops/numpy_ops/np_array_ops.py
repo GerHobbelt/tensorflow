@@ -465,7 +465,10 @@ def compress(condition, a, axis=None):  # pylint: disable=redefined-outer-name,m
   if axis < 0:
     axis += a.ndim
 
-  assert axis >= 0 and axis < a.ndim
+  if axis < 0 or axis >= a.ndim:
+    raise ValueError(
+        f'Argument `axis` is out of bounds for input of rank {a.ndim}.'
+    )
 
   # `tf.boolean_mask` requires `a`'s size along `axis` to equal `condition`'s
   # length. `np.compress` instead pairs `condition[k]` with `a[k]` along `axis`
@@ -1633,9 +1636,14 @@ def vander(x, N=None, increasing=False):  # pylint: disable=missing-docstring,in
     delta = -1
 
   x = array_ops.expand_dims(x, -1)
-  return math_ops.pow(
-      x, math_ops.cast(math_ops.range(start, limit, delta), dtype=x.dtype)
+  exponents = math_ops.cast(math_ops.range(start, limit, delta), dtype=x.dtype)
+  # Avoid 0.0 ** 0.0 in pow, whose gradient evaluates 0 * 0^(-1) = 0 * inf = NaN.
+  # Since x^0 == 1 has zero derivative with respect to x, substituting 1 for x
+  # where exponent == 0 preserves both forward values and exact derivatives.
+  safe_x = array_ops.where_v2(
+      math_ops.equal(exponents, 0), constant_op.constant(1, dtype=x.dtype), x
   )
+  return math_ops.pow(safe_x, exponents)
 
 
 @tf_export.tf_export('experimental.numpy.ix_', v1=[])
