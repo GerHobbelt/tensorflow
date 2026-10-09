@@ -233,7 +233,7 @@ void CommonPjRtBuffer::ScopedHold::ConvertUsageHold(PjRtDeviceEventRef event) {
     absl::MutexLock lock(parent()->mu_);
     CHECK(parent()->device_buffer() == buffer() ||
           parent()->device_buffer() == nullptr);
-    buffer()->AddUsageEvent(std::move(event));
+    buffer()->usage_events().AddEvent(std::move(event));
     parent()->DecrementUsage();
   }
   SetState(kConverted);
@@ -269,7 +269,7 @@ bool CommonPjRtBuffer::IsDeleted() const {
 
 absl::Status CommonPjRtBuffer::AcquireScopedRawBuffer(
     absl::AnyInvocable<absl::StatusOr<PjRtDeviceEventRef>(
-        tsl::RCReference<CommonPjRtRawBuffer> raw_buffer,
+        PjRtRawBufferRef raw_buffer,
         std::vector<tsl::RCReference<tsl::AsyncValue>> definition_events) &&>
         scoped_acquire,
     const char* caller_name) {
