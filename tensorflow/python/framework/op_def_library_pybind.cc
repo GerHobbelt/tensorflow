@@ -611,8 +611,7 @@ void CheckAllInputsUsed(const std::string& op_type_name,
 
 // This module provides a subset of the functionality from op_def_library.py
 // and relies on op_def_library_test.py for test coverage.
-PYBIND11_MODULE(
-    _op_def_library_pybind, m, pybind11::mod_gil_not_used()) {
+PYBIND11_MODULE(_op_def_library_pybind, m, pybind11::mod_gil_not_used()) {
   // Method assumes all inputs in `keywords` are of type tf.Tensor.
   m.def("process_inputs", [](std::string& op_type_name, int producer_version,
                              py::dict& keywords) {
