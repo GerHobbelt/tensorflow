@@ -510,6 +510,8 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_gpu_experimental_enable_checksum_tracing_on_thunks(false);
   opts.set_xla_gpu_experimental_enable_buffer_saver_on_thunks(false);
   opts.set_xla_gpu_experimental_thunk_buffer_debug_module_outputs(false);
+  opts.set_xla_gpu_enable_gxl_ragged_all_to_all(false);
+  opts.set_xla_gpu_gxl_scratch_size_bytes(64 * 1024 * 1024);
 
   // Disable float checks.
   opts.set_xla_gpu_detect_nan(DebugOptions::DETECTION_MODE_NONE);
@@ -530,6 +532,15 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
       DebugOptions::DEVICELESS_CUB_WITH_FALLBACK);
   opts.set_xla_gpu_cudnn_deviceless_compilation_mode(
       DebugOptions::CUDNN_DEVICELESS_COMPILATION_DISABLED);
+  // Pre-populate all default autotune backends so that modifier flags (e.g.
+  // +cudnn, -triton) can apply to the full default set.
+  for (int i = 0; i < autotuner::Backend_descriptor()->value_count(); ++i) {
+    const auto backend = static_cast<autotuner::Backend>(
+        autotuner::Backend_descriptor()->value(i)->number());
+    if (backend != autotuner::Backend::UNSPECIFIED_BACKEND) {
+      opts.add_xla_gpu_experimental_autotune_backends(backend);
+    }
+  }
   return opts;
 }
 
@@ -3212,6 +3223,16 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
                 "In symmetric mode, the put/signal path is used. "
                 "See CollectivesMode for details."));
   flag_list->push_back(tsl::Flag(
+      "xla_gpu_enable_gxl_ragged_all_to_all",
+      bool_setter_for(&DebugOptions::set_xla_gpu_enable_gxl_ragged_all_to_all),
+      debug_options->xla_gpu_enable_gxl_ragged_all_to_all(),
+      "If true, enable the GXL library for NCCL collectives."));
+  flag_list->push_back(tsl::Flag(
+      "xla_gpu_gxl_scratch_size_bytes",
+      int64_setter_for(&DebugOptions::set_xla_gpu_gxl_scratch_size_bytes),
+      debug_options->xla_gpu_gxl_scratch_size_bytes(),
+      "Size in bytes of the scratch buffer for GXL collectives."));
+  flag_list->push_back(tsl::Flag(
       "xla_gpu_experimental_use_ragged_dot_grouped_gemm",
       bool_setter_for(
           &DebugOptions::set_xla_gpu_experimental_use_ragged_dot_grouped_gemm),
@@ -3407,7 +3428,8 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       setter_for_xla_gpu_command_buffer_update_mode,
       DebugOptions::CommandBufferUpdateMode_Name(
           debug_options->xla_gpu_command_buffer_update_mode()),
-      "Controls the VA remapping update strategy for command buffer thunks. "
+      "Controls the VA remapping allocation strategy for command buffer "
+      "thunks. "
       "See CommandBufferUpdateMode for details."));
   flag_list->push_back(tsl::Flag(
       "xla_gpu_experimental_cost_model_gemm_tiling_options",

@@ -2381,7 +2381,21 @@ R"(HloModule CollectiveBroadcast, entry_computation_layout={(f32[128,32]{0,1})->
 
 ENTRY CollectiveBroadcast {
   input = f32[128,32]{0,1} parameter(0)
-  ROOT cb = f32[128,32]{0,1} collective-broadcast(input), replica_groups={{1,0},{2,3}}
+  ROOT cb = f32[128,32]{0,1} collective-broadcast(input), replica_groups={{1,0},{2,3}}, has_dynamic_root=false
+}
+
+)",
+/*replica_count=*/4,
+},
+// collective-broadcast with dynamic root
+{
+"CollectiveBroadcastDynamicRoot",
+R"(HloModule CollectiveBroadcast, entry_computation_layout={(f32[128,32]{0,1}, f32[1]{0})->f32[128,32]{0,1}}, replica_count=4
+
+ENTRY CollectiveBroadcast {
+  input = f32[128,32]{0,1} parameter(0)
+  root = f32[1]{0} parameter(1)
+  ROOT cb = f32[128,32]{0,1} collective-broadcast(input, root), replica_groups={{1,0},{2,3}}, has_dynamic_root=true
 }
 
 )",
@@ -4652,12 +4666,12 @@ TEST_F(HloParserTest, ParseReplicaGroupsV3) {
   EXPECT_EQ("{{0,1},{2,3}}", ReplicaGroupsToString(replica_groups));
 }
 
-TEST_F(HloParserTest, ParseReplicaGroupsMaximalMeshError) {
+TEST_F(HloParserTest, ParseReplicaGroupsMaximalMesh) {
   const std::string original = "maximal_mesh[device_id=1] {}";
   auto status = ParseReplicaGroupsOnly(original).status();
-  EXPECT_FALSE(status.ok());
-  EXPECT_THAT(status.message(),
-              HasSubstr("must have more than one device per group"));
+  ASSERT_OK_AND_ASSIGN(std::vector<ReplicaGroup> replica_groups,
+                       ParseReplicaGroupsOnly(original));
+  EXPECT_EQ("{{1}}", ReplicaGroupsToString(replica_groups));
 }
 
 TEST_F(HloParserTest, ParseDynamicReshapeMissingOperands) {

@@ -219,6 +219,7 @@ cc_library(
         "//xla/hlo/pass:hlo_pass",
         "//xla/hlo/utils:hlo_traversal",
         "//xla/service:hlo_cost_analysis",
+        "//xla/service:hlo_graph_dumper",
         "//xla/service:instruction_fusion",
         "//xla/service:pattern_matcher",
         "//xla/service/gpu:backend_configs_cc",
@@ -982,6 +983,29 @@ cc_library(
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/strings",
         "@cudnn_frontend_archive//:cudnn_frontend",
+    ],
+)
+
+xla_test(
+    name = "cudnn_fusion_compiler_test",
+    srcs = ["cudnn_fusion_compiler_test.cc"],
+    backends = [
+        "a100",
+        "h100",
+        "b200",
+    ],
+    tags = [
+        "cuda-only",
+        "no_mac",
+    ],
+    deps = [
+        ":cudnn_fusion_compiler",
+        "//xla/backends/gpu/tests:hlo_pjrt_gpu_test_base",
+        "//xla/hlo/ir:hlo",
+        "//xla/stream_executor:platform_manager",
+        "//xla/stream_executor:stream_executor_h",
+        "@com_google_absl//absl/log:check",
+        "@com_google_googletest//:gtest_main",
     ],
 )
 

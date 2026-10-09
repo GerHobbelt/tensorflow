@@ -2047,6 +2047,9 @@ HloInstruction* HloParserImpl::CreateInstruction(  // NOLINT
           *shape, operands, std::move(device_list), channel_id));
     }
     case HloOpcode::kCollectiveBroadcast: {
+      optional<bool> has_dynamic_root;
+      attrs["has_dynamic_root"] = {/*required=*/false, AttrTy::kBool,
+                                   &has_dynamic_root};
       std::unique_ptr<CollectiveDeviceListBase> device_list =
           std::make_unique<CollectiveDeviceList>(std::vector<ReplicaGroup>{});
       attrs["replica_groups"] = {
@@ -2058,7 +2061,8 @@ HloInstruction* HloParserImpl::CreateInstruction(  // NOLINT
         return nullptr;
       }
       return builder->AddInstruction(HloInstruction::CreateCollectiveBroadcast(
-          *shape, operands, std::move(device_list), false, channel_id));
+          *shape, operands, std::move(device_list), false, channel_id,
+          has_dynamic_root ? *has_dynamic_root : false));
     }
     case HloOpcode::kCollectivePermute:
     case HloOpcode::kCollectivePermuteStart: {
@@ -3924,12 +3928,6 @@ bool HloParserImpl::ParseCollectiveDeviceListBase(
     for (const auto& axis : axes) {
       devices_per_group *= axis.size(*mesh);
     }
-    if (devices_per_group <= 1) {
-      return TokenError(absl::StrCat(
-          "MeshAxesReplicaGroupList must have more than one device per group, "
-          "but got ",
-          devices_per_group));
-    }
     *device_list = std::make_unique<MeshAxesReplicaGroupList>(*mesh, axes);
     return true;
   }
@@ -4384,6 +4382,7 @@ bool HloParserImpl::ParseSingleSharding(
 
   std::vector<AxisRef> replicated_axes;
   std::vector<AxisRef> unreduced_axes;
+  NamedSharding::ReductionOp reduction_op = NamedSharding::ReductionOp::kSum;
   std::vector<AxisRef> manual_axes;
 
   while (lexer_.GetKind() != TokKind::kRbrace) {
@@ -4399,6 +4398,20 @@ bool HloParserImpl::ParseSingleSharding(
         return false;
       }
     } else if (attr_name == "unreduced") {
+      if (lexer_.GetKind() == TokKind::kAttributeName ||
+          lexer_.GetKind() == TokKind::kIdent) {
+        std::string op_str = lexer_.GetStrVal();
+        if (op_str == "sum") {
+          reduction_op = NamedSharding::ReductionOp::kSum;
+        } else if (op_str == "max") {
+          reduction_op = NamedSharding::ReductionOp::kMax;
+        } else if (op_str == "min") {
+          reduction_op = NamedSharding::ReductionOp::kMin;
+        } else {
+          return TokenError("expected sum, max, or min for unreduced op");
+        }
+        lexer_.Lex();
+      }
       if (!ParseAxisRefList(*mesh, unreduced_axes)) {
         return false;
       }
@@ -4417,7 +4430,7 @@ bool HloParserImpl::ParseSingleSharding(
     }
   }
   sharding = NamedSharding(*mesh, dim_shardings, replicated_axes,
-                           unreduced_axes, manual_axes, metadata);
+                           unreduced_axes, manual_axes, metadata, reduction_op);
   return ParseToken(TokKind::kRbrace, "expected '}' to end sharding attribute");
 }
 
