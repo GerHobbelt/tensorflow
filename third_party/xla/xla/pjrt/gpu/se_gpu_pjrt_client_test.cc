@@ -2189,7 +2189,25 @@ TEST(StreamExecutorGpuClientTest, EventCaching) {
   // New events are getting assigned.
   EXPECT_NE(&*event0, &*event2);
   tsl::BlockUntilReady(event2);
-  // sync_point1 is ready, so it is the most recent event.
+  // Wait for the background cleanup callback to prune the completed event0,
+  // which is happening asynchronously.
+  // If pruning has occurred, querying with nullptr_if_past = true will return a
+  // null event.
+  bool pruned = false;
+  absl::Time deadline = absl::Now() + absl::Seconds(1);
+  while (absl::Now() < deadline) {
+    TF_ASSERT_OK_AND_ASSIGN(
+        auto event,
+        local_device_state->GetEventForComputeStreamSyncPoint(
+            sync_point0, async_work_runner, /*nullptr_if_past=*/true));
+    if (!event) {
+      pruned = true;
+      break;
+    }
+    absl::SleepFor(absl::Milliseconds(10));
+  }
+  ASSERT_TRUE(pruned) << "Timeout waiting for completed event0 to be pruned.";
+
   TF_ASSERT_OK_AND_ASSIGN(auto event3,
                           local_device_state->GetEventForComputeStreamSyncPoint(
                               sync_point0, async_work_runner));
@@ -2216,7 +2234,7 @@ TEST(StreamExecutorGpuClientTest, LinkedEventPromise) {
       client->AllocateRawBuffer(memory_space, on_device_bytes_count,
                                 /*retry_on_oom=*/true,
                                 /*allocate_after=*/{}));
-  tsl::RCReference<PjRtDeviceEventPromise> promise;
+  PjRtDeviceEventPromiseRef promise;
   PjRtDeviceEventRef event;
   TF_ASSERT_OK_AND_ASSIGN(std::tie(promise, event),
                           client->CreateLinkedEventPromise(memory_space, ""));
@@ -2230,7 +2248,7 @@ TEST(StreamExecutorGpuClientTest, LinkedEventPromise) {
           literal, device_shape,
           PjRtClient::HostBufferSemantics::kImmutableUntilTransferCompletes,
           raw_buffer));
-  promise->Set(std::move(definition_event));
+  promise.Set(std::move(definition_event));
 
   TF_ASSERT_OK_AND_ASSIGN(auto new_literal, buffer->ToLiteral().Await());
   ASSERT_EQ(literal, *new_literal);

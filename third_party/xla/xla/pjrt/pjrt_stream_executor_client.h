@@ -374,10 +374,10 @@ class PjRtStreamExecutorClient : public CommonPjRtClient {
                        LocalDeviceState* local_device,
                        EventPool::Handle device_event, se::Stream* stream);
 
-  absl::Status AllocateAndRecordEvent(BufferSequencingEventRef event,
-                                      LocalDeviceState* local_device,
-                                      se::Stream* stream,
-                                      absl::string_view tag = "");
+  absl::Status AllocateAndRecordEvent(
+      BufferSequencingEventRef event, LocalDeviceState* local_device,
+      se::Stream* stream, absl::string_view tag = "",
+      absl::AnyInvocable<void() &&> cleanup = {});
 
   PjRtDeviceEventRef CreateErrorDeviceEvent(absl::Status error);
 
@@ -429,8 +429,7 @@ class PjRtStreamExecutorClient : public CommonPjRtClient {
       absl::AnyInvocable<void() &&> on_done_with_host_buffer,
       const xla::Shape& device_shape, PjRtRawBufferRef raw_buffer) override;
 
-  absl::StatusOr<
-      std::pair<tsl::RCReference<PjRtDeviceEventPromise>, PjRtDeviceEventRef>>
+  absl::StatusOr<std::pair<PjRtDeviceEventPromiseRef, PjRtDeviceEventRef>>
   CreateLinkedEventPromise(PjRtMemorySpace* memory_space,
                            absl::string_view debug_info) override;
 
@@ -440,6 +439,13 @@ class PjRtStreamExecutorClient : public CommonPjRtClient {
   absl::Status WaitOnStream(PjRtMemorySpace* memory_space,
                             PjRtDeviceEventRef event,
                             std::intptr_t stream) override;
+
+  bool ShouldDoDirectTransfer(const MutableLiteralBase& literal,
+                              const Shape& shape,
+                              PjRtMemorySpace* memory_space) const override;
+
+  tsl::AsyncValueRef<PjRtStagingBuffer> AllocateForDelinearizationAsync(
+      size_t size, PjRtMemorySpace* memory_space) override;
 
   absl::Status WaitForAllocation(se::Stream* stream,
                                  const CommonPjRtRawBuffer& raw_buffer);
@@ -566,9 +572,9 @@ class PjRtStreamExecutorRawLoadedExecutable : public PjRtRawLoadedExecutable {
   PjRtRawLoadedExecutable::RawExecuteResult Execute(
       const ExecuteOptions& options, absl::Span<const PjRtRawBufferRef> inputs,
       absl::Span<const PjRtRawBufferRef> results,
-      std::unique_ptr<PjRtDeviceEventSet> extra_deps,
-      std::unique_ptr<PjRtDeviceEventSet> control_deps,
-      bool is_predetermined_error, bool fill_future) &&
+      PjRtDeviceEventRefVector extra_deps,
+      PjRtDeviceEventRefVector control_deps, bool is_predetermined_error,
+      bool fill_future) &&
       override;
 
  private:

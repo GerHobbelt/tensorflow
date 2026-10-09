@@ -38,6 +38,8 @@ namespace xla {
 namespace internal {
 
 const PJRT_DeviceEvent_FunctionTable* GetBuiltinAsyncValueCApiFunctionTable();
+const PJRT_DeviceEventPromise_FunctionTable*
+GetBuiltinDeviceEventPromiseCApiFunctionTable();
 
 PJRT_DeviceEvent_State ToPjrtDeviceEventState(tsl::AsyncValue::State state);
 
@@ -246,6 +248,7 @@ class PjRtDeviceEventRef {
               value.ReleaseRCRef().release()}) {}
 
   PjRtDeviceEventPtr ptr() const { return ptr_; }
+  explicit operator PjRtDeviceEventPtr() const { return ptr_; }
 
   template <typename Waiter>
   void AndThen(Waiter&& cb) const {
@@ -293,8 +296,10 @@ class PjRtDeviceEventRef {
 // Instead of taking a device event as an argument, apis may instead decide to
 // return a promise which is fulfilled later.
 class PjRtDeviceEventPromise
-    : public tsl::ReferenceCounted<PjRtDeviceEventPromise> {
+    : public PJRT_DeviceEventPromise,
+      public tsl::ReferenceCounted<PjRtDeviceEventPromise> {
  public:
+  PjRtDeviceEventPromise();
   virtual ~PjRtDeviceEventPromise() = default;
 
   // The underlying AsyncValue.
@@ -308,58 +313,123 @@ class PjRtDeviceEventPromise
 
   // Mark the event as ready.
   virtual void SetReady() = 0;
+
+  virtual PJRT_DeviceEventPromise* ToC() { return this; }
 };
 
-// A collection of events. This is not an event itself because we may want to
-// add events in the future.
-class PjRtDeviceEventSet {
+class PjRtDeviceEventPromiseRef {
  public:
-  virtual ~PjRtDeviceEventSet() = default;
+  PjRtDeviceEventPromiseRef() : promise_(nullptr) {}
+  explicit PjRtDeviceEventPromiseRef(
+      tsl::RCReference<PjRtDeviceEventPromise> promise);
+  ~PjRtDeviceEventPromiseRef();
+  PjRtDeviceEventPromiseRef(const PjRtDeviceEventPromiseRef& other);
+  PjRtDeviceEventPromiseRef& operator=(const PjRtDeviceEventPromiseRef& other);
+  PjRtDeviceEventPromiseRef(PjRtDeviceEventPromiseRef&& other) noexcept;
+  PjRtDeviceEventPromiseRef& operator=(
+      PjRtDeviceEventPromiseRef&& other) noexcept;
 
-  virtual void AddEvent(PjRtDeviceEventRef event) = 0;
+  static PjRtDeviceEventPromiseRef TakeRef(PJRT_DeviceEventPromise* promise);
+  static PjRtDeviceEventPromiseRef FormRef(PJRT_DeviceEventPromise* promise);
 
-  virtual void AppendTo(
-      std::vector<tsl::RCReference<tsl::AsyncValue>>& events) = 0;
-  virtual void AppendTo(std::vector<PjRtDeviceEventRef>& events) = 0;
-  virtual void AppendTo(PjRtDeviceEventSet& events) = 0;
-};
+  PJRT_DeviceEventPromise* get() const { return promise_; }
 
-class DefaultPjRtDeviceEventSet : public PjRtDeviceEventSet {
- public:
-  DefaultPjRtDeviceEventSet() = default;
-  explicit DefaultPjRtDeviceEventSet(size_t reservation) {
-    events_.reserve(reservation);
-  }
+  // The underlying AsyncValue.
+  PjRtDeviceEventPtr event() const;
 
-  void AddEvent(PjRtDeviceEventRef event) override {
-    if (event) {
-      events_.push_back(std::move(event));
+  // Fulfill the promise.
+  void Set(PjRtDeviceEventRef event) const;
+
+  // Mark the promise as an error.
+  void SetError(absl::Status s) const;
+
+  // Mark the event as ready.
+  void SetReady() const;
+
+  template <typename T>
+  tsl::RCReference<T> down_cast() const {
+    if (promise_ == nullptr ||
+        promise_->vtable !=
+            internal::GetBuiltinDeviceEventPromiseCApiFunctionTable()) {
+      return tsl::RCReference<T>();
     }
-  }
-
-  void AppendTo(
-      std::vector<tsl::RCReference<tsl::AsyncValue>>& events) override {
-    for (const auto& event : events_) {
-      if (auto* av = event.async_value()) {
-        events.push_back(tsl::FormRef(av));
-      }
+    auto* cpp_promise = static_cast<PjRtDeviceEventPromise*>(promise_);
+    auto* derived = dynamic_cast<T*>(cpp_promise);
+    if (derived == nullptr) {
+      return tsl::RCReference<T>();
     }
-  }
-  void AppendTo(std::vector<PjRtDeviceEventRef>& events) override {
-    events.insert(events.end(), events_.begin(), events_.end());
-  }
-  void AppendTo(PjRtDeviceEventSet& events) override {
-    for (const auto& event : events_) {
-      events.AddEvent(event);
-    }
+    return tsl::FormRef(derived);
   }
 
-  absl::Span<const PjRtDeviceEventRef> events() const { return events_; }
-
-  std::vector<PjRtDeviceEventRef> Consume() && { return std::move(events_); }
+  explicit operator bool() const { return promise_ != nullptr; }
 
  private:
-  std::vector<PjRtDeviceEventRef> events_;
+  explicit PjRtDeviceEventPromiseRef(PJRT_DeviceEventPromise* promise)
+      : promise_(promise) {}
+
+  PJRT_DeviceEventPromise* promise_;
+};
+
+// C-api compatible version of std::vector<PjRtDeviceEventRef>.
+class PjRtDeviceEventRefVector {
+ public:
+  PjRtDeviceEventRefVector() = default;
+  PjRtDeviceEventRefVector(std::initializer_list<PjRtDeviceEventRef> init);
+  PjRtDeviceEventRefVector(const PjRtDeviceEventRefVector& other);
+  PjRtDeviceEventRefVector(PjRtDeviceEventRefVector&& other) noexcept;
+  PjRtDeviceEventRefVector& operator=(const PjRtDeviceEventRefVector& other);
+  PjRtDeviceEventRefVector& operator=(
+      PjRtDeviceEventRefVector&& other) noexcept;
+  ~PjRtDeviceEventRefVector();
+
+  size_t size() const { return events_.size(); }
+  bool empty() const { return events_.empty(); }
+
+  PjRtDeviceEventPtr operator[](size_t pos) const {
+    return PjRtDeviceEventPtr(events_[pos]);
+  }
+
+  void push_back(const PjRtDeviceEventRef& value);
+  void push_back(PjRtDeviceEventRef&& value);
+
+  void reserve(size_t new_cap) { events_.reserve(new_cap); }
+
+  void Clear();
+
+ private:
+  template <typename Functor>
+  friend void ConsumeEvents(PjRtDeviceEventRefVector&& events, Functor&& f);
+  friend class PjRtDeviceEventSpan;
+
+  std::vector<PJRT_DeviceEvent> events_;
+};
+
+template <typename Functor>
+void ConsumeEvents(PjRtDeviceEventRefVector&& events, Functor&& f) {
+  for (size_t i = 0; i < events.events_.size(); ++i) {
+    PJRT_DeviceEvent ev = events.events_[i];
+    events.events_[i] = {nullptr, nullptr};
+    f(PjRtDeviceEventRef::TakeRef(PjRtDeviceEventPtr(ev)));
+  }
+}
+
+// C-api compatible version of absl::Span<const PjRtDeviceEventRef>.
+class PjRtDeviceEventSpan {
+ public:
+  PjRtDeviceEventSpan() = default;
+  PjRtDeviceEventSpan(const PjRtDeviceEventRefVector& vec)
+      : ptr_(vec.events_.data()), size_(vec.events_.size()) {}
+
+  size_t size() const { return size_; }
+  bool empty() const { return size_ == 0; }
+
+  PjRtDeviceEventPtr operator[](size_t index) const {
+    return PjRtDeviceEventPtr(ptr_[index]);
+  }
+
+ private:
+  const PJRT_DeviceEvent* ptr_ = nullptr;
+  size_t size_ = 0;
 };
 
 }  // namespace xla
