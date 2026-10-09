@@ -195,7 +195,25 @@ cc_library(
     ]),
     deps = [
         ":common_pjrt_client",
+        ":pjrt_client",
+        ":pjrt_executable",
+        ":pjrt_layout",
         ":utils",
+        "//xla:shape_util",
+        "//xla:util",
+        "//xla/hlo/ir:hlo",
+        "//xla/hlo/ir:hlo_sharding",
+        "//xla/mlir/utils:type_util",
+        "//xla/service/spmd/shardy/stablehlo_round_trip:export_shardings",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:FuncDialect",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Support",
+        "@shardy//shardy/dialect/sdy/ir:dialect",
     ],
 )
 
@@ -272,8 +290,6 @@ cc_library(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/synchronization",
-        "@tsl//tsl/profiler/lib:connected_traceme",
-        "@tsl//tsl/profiler/lib:context_types_hdrs",
         "@tsl//tsl/profiler/lib:traceme",
     ],
 )
@@ -968,6 +984,7 @@ xla_cc_test(
         "//xla/hlo/testlib:test",
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:status_matchers",
         "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest_main",
         "@llvm-project//mlir:IR",
@@ -1337,6 +1354,7 @@ cc_library(
         "//xla/service/gpu/llvm_gpu_backend:amdgpu_backend",
         "//xla/stream_executor:device_description",
         "//xla/stream_executor/rocm:rocm_compute_capability",
+        "//xla/tsl/platform:env",
         "//xla/tsl/platform:errors",
         "//xla/tsl/platform:logging",
         "//xla/tsl/platform:statusor",
@@ -1364,6 +1382,7 @@ cc_library(
         "@llvm-project//mlir:Transforms",
         "@triton//:TritonDialects",
         "@tsl//tsl/platform:path",
+        "@tsl//tsl/platform:random",
     ],
 )
 

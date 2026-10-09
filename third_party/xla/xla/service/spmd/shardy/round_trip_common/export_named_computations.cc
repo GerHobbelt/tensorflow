@@ -226,12 +226,13 @@ void exportNamedComputations(ModuleOp moduleOp, SymbolTable& symbolTable,
         namedComputationOp, namedComputationOp.getResultTypes(), funcSymName,
         namedComputationOp.getOperands());
     callOp->setAttrs(callOpAttrs);
+    // TODO(enver): Use utils methods for inserting copies/reshards instead.
 
-    // Copy the func output shardings to the call op.
     FuncOp funcOp = symbolTable.lookup<FuncOp>(funcSymName);
+    maybeInsertReshardsOnFuncArguments(funcOp, callOp, symbolTable, rewriter);
+    // Copy the func output shardings to the call op.
     if (TensorShardingPerValueAttr funcResultShardings =
-            getFuncResultShardings(funcOp, symbolTable);
-        funcResultShardings) {
+            getFuncResultShardings(funcOp, symbolTable)) {
       mlir::sdy::setShardings(callOp, funcResultShardings);
       if (outShardings.has_value()) {
         for (auto [funcResultSharding, outSharding, result] : llvm::zip_equal(

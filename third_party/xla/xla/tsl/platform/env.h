@@ -21,6 +21,7 @@ limitations under the License.
 #include <cstddef>
 #include <memory>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -248,6 +249,29 @@ class Env {
     return absl::OkStatus();
   }
 
+  // TODO(b/485502789): Remove the const std::string& versions of these
+  // functions and move the actual implementation here, avoiding the string
+  // copy.
+  // Until then, we need to SFINAE out the std::string case to avoid ambiguity
+  // errors when T could be deduced as either absl::string_view or std::string
+  // (e.g. tstring).
+  template <typename T,
+            typename = std::enable_if_t<
+                std::is_convertible_v<const T&, absl::string_view> &&
+                !std::is_same_v<std::decay_t<T>, std::string>>>
+  absl::Status GetMatchingPaths(const T& pattern,
+                                std::vector<std::string>* results) {
+    return GetMatchingPaths(std::string(pattern), results);
+  }
+  template <typename T,
+            typename = std::enable_if_t<
+                std::is_convertible_v<const T&, absl::string_view> &&
+                !std::is_same_v<std::decay_t<T>, std::string>>>
+  absl::Status GetMatchingPaths(const T& pattern, TransactionToken* token,
+                                std::vector<std::string>* results) {
+    return GetMatchingPaths(std::string(pattern), token, results);
+  }
+
   /// Deletes the named file.
   absl::Status DeleteFile(const std::string& fname);
 
@@ -301,6 +325,28 @@ class Env {
                                     TransactionToken* token) {
     return absl::OkStatus();
   }
+
+  // TODO(b/485502789): Remove the const std::string& versions of these
+  // functions and move the actual implementation here, avoiding the string
+  // copy.
+  // Until then, we need to SFINAE out the std::string case to avoid ambiguity
+  // errors when T could be deduced as either absl::string_view or std::string
+  // (e.g. tstring).
+  template <typename T,
+            typename = std::enable_if_t<
+                std::is_convertible_v<const T&, absl::string_view> &&
+                !std::is_same_v<std::decay_t<T>, std::string>>>
+  absl::Status RecursivelyCreateDir(const T& dirname) {
+    return RecursivelyCreateDir(std::string(dirname));
+  }
+  template <typename T,
+            typename = std::enable_if_t<
+                std::is_convertible_v<const T&, absl::string_view> &&
+                !std::is_same_v<std::decay_t<T>, std::string>>>
+  absl::Status RecursivelyCreateDir(const T& dirname, TransactionToken* token) {
+    return RecursivelyCreateDir(std::string(dirname), token);
+  }
+
   /// \brief Creates the specified directory. Typical return codes
   ///  * OK - successfully created the directory.
   ///  * ALREADY_EXISTS - directory already exists.
@@ -309,6 +355,26 @@ class Env {
 
   absl::Status CreateDir(const std::string& dirname, TransactionToken* token) {
     return absl::OkStatus();
+  }
+  // TODO(b/485502789): Remove the const std::string& versions of these
+  // functions and move the actual implementation here, avoiding the string
+  // copy.
+  // Until then, we need to SFINAE out the std::string case to avoid ambiguity
+  // errors when T could be deduced as either absl::string_view or std::string
+  // (e.g. tstring).
+  template <typename T,
+            typename = std::enable_if_t<
+                std::is_convertible_v<const T&, absl::string_view> &&
+                !std::is_same_v<std::decay_t<T>, std::string>>>
+  absl::Status CreateDir(const T& dirname) {
+    return CreateDir(std::string(dirname));
+  }
+  template <typename T,
+            typename = std::enable_if_t<
+                std::is_convertible_v<const T&, absl::string_view> &&
+                !std::is_same_v<std::decay_t<T>, std::string>>>
+  absl::Status CreateDir(const T& dirname, TransactionToken* token) {
+    return CreateDir(std::string(dirname), token);
   }
 
   /// Deletes the specified directory.
@@ -335,6 +401,19 @@ class Env {
   ///  * UNIMPLEMENTED - The file factory doesn't support directories.
   absl::Status IsDirectory(const std::string& fname);
 
+  // TODO(b/485502789): Remove the const std::string& version of this function
+  // and move the actual implementation here, avoiding the string copy.
+  // Until then, we need to SFINAE out the std::string case to avoid ambiguity
+  // errors when T could be deduced as either absl::string_view or std::string
+  // (e.g. tstring).
+  template <typename T,
+            typename = std::enable_if_t<
+                std::is_convertible_v<const T&, absl::string_view> &&
+                !std::is_same_v<std::decay_t<T>, std::string>>>
+  absl::Status IsDirectory(const T& fname) {
+    return IsDirectory(std::string(fname));
+  }
+
   /// \brief Returns whether the given path is on a file system
   /// that has atomic move capabilities. This can be used
   /// to determine if there needs to be a temp location to safely write objects.
@@ -358,6 +437,9 @@ class Env {
   /// \brief Renames file src to target. If target already exists, it will be
   /// replaced.
   absl::Status RenameFile(const std::string& src, const std::string& target);
+
+  absl::Status RenameFile(const std::string& src, const std::string& target,
+                          bool overwrite);
 
   absl::Status RenameFile(const std::string& src, const std::string& target,
                           TransactionToken* token) {
@@ -652,10 +734,36 @@ absl::Status FileSystemCopyFile(FileSystem* src_fs, const std::string& src,
 absl::Status ReadFileToString(Env* env, const std::string& fname,
                               std::string* data);
 
+// TODO(b/485502789): Remove the const std::string& version of this function
+// and move the actual implementation here, avoiding the string copy.
+// Until then, we need to SFINAE out the std::string case to avoid ambiguity
+// errors when T could be deduced as either absl::string_view or std::string
+// (e.g. tstring).
+template <typename T, typename = std::enable_if_t<
+                          std::is_convertible_v<const T&, absl::string_view> &&
+                          !std::is_same_v<std::decay_t<T>, std::string>>>
+inline absl::Status ReadFileToString(Env* env, const T& fname,
+                                     std::string* data) {
+  return ReadFileToString(env, std::string(fname), data);
+}
+
 /// A utility routine: write contents of `data` to file named `fname`
 /// (overwriting existing contents, if any).
 absl::Status WriteStringToFile(Env* env, const std::string& fname,
                                absl::string_view data);
+
+// TODO(b/485502789): Remove the const std::string& version of this function
+// and move the actual implementation here, avoiding the string copy.
+// Until then, we need to SFINAE out the std::string case to avoid ambiguity
+// errors when T could be deduced as either absl::string_view or std::string
+// (e.g. tstring).
+template <typename T, typename = std::enable_if_t<
+                          std::is_convertible_v<const T&, absl::string_view> &&
+                          !std::is_same_v<std::decay_t<T>, std::string>>>
+inline absl::Status WriteStringToFile(Env* env, const T& fname,
+                                      absl::string_view data) {
+  return WriteStringToFile(env, std::string(fname), data);
+}
 
 /// A utility routine: append contents of `data` to file named `fname`.
 /// If the file does not exist, it is created.
@@ -671,6 +779,19 @@ absl::Status WriteBinaryProto(Env* env, const std::string& fname,
 absl::Status ReadBinaryProto(Env* env, const std::string& fname,
                              protobuf::MessageLite* proto);
 
+// TODO(b/485502789): Remove the const std::string& version of this function
+// and move the actual implementation here, avoiding the string copy.
+// Until then, we need to SFINAE out the std::string case to avoid ambiguity
+// errors when T could be deduced as either absl::string_view or std::string
+// (e.g. tstring).
+template <typename T, typename = std::enable_if_t<
+                          std::is_convertible_v<const T&, absl::string_view> &&
+                          !std::is_same_v<std::decay_t<T>, std::string>>>
+absl::Status ReadBinaryProto(Env* env, const T& fname,
+                             protobuf::MessageLite* proto) {
+  return ReadBinaryProto(env, std::string(fname), proto);
+}
+
 /// Write the text representation of "proto" to the named file.
 inline absl::Status WriteTextProto(Env* /* env */,
                                    const std::string& /* fname */,
@@ -679,6 +800,27 @@ inline absl::Status WriteTextProto(Env* /* env */,
 }
 absl::Status WriteTextProto(Env* env, const std::string& fname,
                             const protobuf::Message& proto);
+
+// TODO(b/485502789): Remove the const std::string& versions of these
+// functions and move the actual implementation here, avoiding the string
+// copy.
+// Until then, we need to SFINAE out the std::string case to avoid ambiguity
+// errors when T could be deduced as either absl::string_view or std::string
+// (e.g. tstring).
+template <typename T, typename = std::enable_if_t<
+                          std::is_convertible_v<const T&, absl::string_view> &&
+                          !std::is_same_v<std::decay_t<T>, std::string>>>
+inline absl::Status WriteTextProto(Env* env, const T& fname,
+                                   const protobuf::MessageLite& proto) {
+  return WriteTextProto(env, std::string(fname), proto);
+}
+template <typename T, typename = std::enable_if_t<
+                          std::is_convertible_v<const T&, absl::string_view> &&
+                          !std::is_same_v<std::decay_t<T>, std::string>>>
+absl::Status WriteTextProto(Env* env, const T& fname,
+                            const protobuf::Message& proto) {
+  return WriteTextProto(env, std::string(fname), proto);
+}
 
 /// Read contents of named file and parse as text encoded proto data
 /// and store into `*proto`.

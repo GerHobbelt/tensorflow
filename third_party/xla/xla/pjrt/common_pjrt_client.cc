@@ -862,9 +862,9 @@ static std::unique_ptr<PjRtBuffer> CreateOutputLeafBuffer(
     CHECK(memory_space) << "No memory space found for device: "
                         << device->DebugString() << " kind: " << kind_id;
   }
-  auto buffer_or =
-      client->DefineBuffer(output_leaf_shape, memory_space,
-                           std::move(leaf_buffer), {definition_event});
+  auto buffer_or = client->DefineBuffer(output_leaf_shape, memory_space,
+                                        std::move(leaf_buffer),
+                                        {std::move(definition_event)});
   CHECK_OK(buffer_or);
   return *std::move(buffer_or);
 }
@@ -897,8 +897,9 @@ std::vector<std::unique_ptr<PjRtBuffer>> CommonPjRtClient::CreateOutputs(
   } else if (!output_device_shape.IsTuple() &&
              output_leaf_buffers.size() == 1) {
     res.push_back(CreateOutputLeafBuffer(
-        output_leaf_shapes[0], definition_event, is_predetermined_error, this,
-        device, get_buffer(0), output_memory_space_kind_ids[0]));
+        output_leaf_shapes[0], std::move(definition_event),
+        is_predetermined_error, this, device, get_buffer(0),
+        output_memory_space_kind_ids[0]));
   } else {
     CHECK(is_predetermined_error)
         << "Nontuple results must have a single result buffer.";

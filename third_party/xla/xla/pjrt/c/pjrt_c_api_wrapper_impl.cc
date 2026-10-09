@@ -725,24 +725,24 @@ PJRT_Error* PJRT_Client_UpdateGlobalProcessInfo(
   auto translate_state = [](PJRT_ProcessState state) {
     switch (state) {
       case PJRT_ProcessState_kUnspecified:
-        return xla::coordination::CoordinatedTaskState::TASKSTATE_UNSPECIFIED;
+        return xla::coordination::TaskState::UNSPECIFIED;
       case PJRT_ProcessState_kUninitialized:
-        return xla::coordination::CoordinatedTaskState::TASKSTATE_UNINITIALIZED;
+        return xla::coordination::TaskState::UNINITIALIZED;
       case PJRT_ProcessState_kDisconnected:
-        return xla::coordination::CoordinatedTaskState::TASKSTATE_DISCONNECTED;
+        return xla::coordination::TaskState::DISCONNECTED;
       case PJRT_ProcessState_kConnected:
-        return xla::coordination::CoordinatedTaskState::TASKSTATE_CONNECTED;
+        return xla::coordination::TaskState::CONNECTED;
       case PJRT_ProcessState_kError:
-        return xla::coordination::CoordinatedTaskState::TASKSTATE_ERROR;
+        return xla::coordination::TaskState::ERROR;
     }
     LOG(FATAL) << "Unexpected PJRT_ProcessState " << state;
   };
 
-  std::vector<xla::coordination::CoordinatedTaskStateInfo> infos;
+  std::vector<xla::coordination::TaskInfo> infos;
   for (int i = 0; i < args->num_process_infos; ++i) {
     PJRT_ProcessInfo* p = &args->process_infos[i];
-    xla::coordination::CoordinatedTaskStateInfo info;
-    info.mutable_task()->set_task_id(p->task_id);
+    xla::coordination::TaskInfo info;
+    info.set_task_id(p->task_id);
     info.set_incarnation(p->incarnation_id);
     info.set_state(translate_state(p->state));
     info.set_error_code(p->error_code);
@@ -2283,9 +2283,11 @@ PJRT_Error* PJRT_LoadedExecutable_Execute(
   if (args->options->call_location) {
     options.call_location = std::string(args->options->call_location);
   }
-  options.context = args->options->context
-                        ? args->options->context->execute_context.get()
-                        : nullptr;
+  std::shared_ptr<xla::ExecuteContext> execute_context;
+  if (args->options->context) {
+    execute_context = args->options->context->execute_context;
+  }
+  options.context = execute_context.get();
   options.multi_slice_config = nullptr;
   // TODO(b/485591964): Remove this check after 12week compatibility window.
   if (args->options->struct_size >= PJRT_ExecuteOptions_STRUCT_SIZE &&
@@ -2334,7 +2336,8 @@ PJRT_Error* PJRT_LoadedExecutable_Execute(
   if (args->execute_device == nullptr) {
     std::vector<std::vector<std::unique_ptr<xla::PjRtBuffer>>> cpp_buffer_lists;
     if (args->device_complete_events != nullptr ||
-        !cpp_send_callbacks->empty() || !cpp_recv_callbacks->empty()) {
+        !cpp_send_callbacks->empty() || !cpp_recv_callbacks->empty() ||
+        execute_context) {
       std::optional<std::vector<xla::Future<>>> returned_futures;
       returned_futures.emplace();
       PJRT_ASSIGN_OR_RETURN(cpp_buffer_lists,
@@ -2345,10 +2348,12 @@ PJRT_Error* PJRT_LoadedExecutable_Execute(
       // We assume that these OnReady callbacks will fire even if
       // returned_futures is destroyed first. This is true for the
       // AsyncValue-based implementation of Future.
-      if (!cpp_send_callbacks->empty() || !cpp_recv_callbacks->empty()) {
+      if (!cpp_send_callbacks->empty() || !cpp_recv_callbacks->empty() ||
+          options.context) {
         for (int i = 0; i < returned_futures->size(); ++i) {
           (*returned_futures)[i].OnReady(
-              [cpp_send_callbacks, cpp_recv_callbacks](absl::Status status) {
+              [cpp_send_callbacks, cpp_recv_callbacks,
+               execute_context](absl::Status status) {
                 // Keeps C++ callbacks alive until execution completes on all
                 // devices.
               });
