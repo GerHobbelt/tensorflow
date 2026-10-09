@@ -106,6 +106,8 @@ class PjRtStreamExecutorRawBuffer : public CommonPjRtRawBufferImpl {
 
   LocalDeviceState* local_device() const { return local_device_; }
 
+  absl::Status ValidateSlice(int64_t offset, int64_t slice_size);
+
   const tsl::AsyncValueRef<RawSEDeviceMemory>& device_buffer() const {
     return device_buffer_;
   }
@@ -131,11 +133,13 @@ class PjRtStreamExecutorRawBuffer : public CommonPjRtRawBufferImpl {
 
   absl::StatusOr<PjRtDeviceEventRef> MakeAllocationReadyEvent() override;
 
+  absl::StatusOr<PjRtRawBufferRef> Slice(int64_t offset, int64_t size) override;
+
   void ReadDynamicShape(tsl::AsyncValueRef<xla::Shape> output_shape,
                         xla::Shape shape) override;
 
   absl::StatusOr<PjRtRawBufferRef> RemoveDynamicShapeMetadataIfPresent(
-      const xla::Shape& logical_shape) override;
+      const xla::Shape& device_shape, const xla::Shape& logical_shape) override;
 
   void CopyToLiteralAsync(
       Promise<> promise,
@@ -160,8 +164,7 @@ class PjRtStreamExecutorRawBuffer : public CommonPjRtRawBufferImpl {
 
   absl::StatusOr<PjRtDeviceEventRef> CopyRawToRemoteDevice(
       Future<std::string> serialized_descriptor, RemoteSendCallback on_done,
-      std::vector<tsl::RCReference<tsl::AsyncValue>> transfer_dependency_avs)
-      override;
+      std::vector<PjRtDeviceEventRef> transfer_dependency_avs) override;
 
   void DecrefAfter(std::vector<PjRtDeviceEventRef> avs) override { DropRef(); }
 

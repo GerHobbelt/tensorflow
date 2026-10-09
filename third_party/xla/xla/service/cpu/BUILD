@@ -291,6 +291,7 @@ cc_library(
         "//xla/stream_executor:stream_executor_h",
         "//xla/stream_executor/host:host_platform_id",
         "//xla/tsl/concurrency:async_value",
+        "//xla/tsl/concurrency:executor",
         "//xla/tsl/platform:env",
         "//xla/tsl/platform:errors",
         "//xla/tsl/platform:status",
@@ -479,6 +480,7 @@ xla_cc_test(
     tags = ["pjrt_migration_candidate"],
     deps = [
         ":cpu_compiler_pure",
+        ":cpu_options",
         "//xla/backends/cpu/codegen/emitters:cpu_fusion_emitter_config",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/testlib:hlo_hardware_independent_test_base",

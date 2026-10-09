@@ -959,6 +959,15 @@ absl::Status CudaExecutor::Init() {
   vmm_options_.enable_peer_access = absl::c_any_of(
       peer_access_cache_, [](const auto& p) { return p.second; });
 
+  // Disable fabric handle if there are no active P2P NVLinks — using
+  // FABRIC+POSIX_FD without a cluster causes allocation failures.
+  if (vmm_options_.enable_fabric_handle &&
+      GetDeviceDescription().device_interconnect_info().active_links == 0) {
+    XLA_VLOG_DEVICE(2, device_ordinal())
+        << "Disabling fabric handle: no active P2P NVLinks detected.";
+    vmm_options_.enable_fabric_handle = false;
+  }
+
   device_allocator_ = std::make_unique<CudaDeviceAllocator>(this);
   host_allocator_ = std::make_unique<CudaHostAllocator>(this, numa_node_);
   vmm_allocator_ = std::make_unique<CudaVmmAllocator>(this, vmm_options_);
@@ -1709,7 +1718,7 @@ CudaExecutor::CreateDeviceDescription(int device_ordinal) {
         LOG(ERROR) << p2p_link_count;
       }
       // nvmlDeviceGetGpuFabricInfoV is only available in driver r545+
-      if (desc.kernel_mode_driver_version().major() >= 545) {  // NOLINT
+      if (desc.kernel_mode_driver_version().major_version() >= 545) {  // NOLINT
         absl::StatusOr<FabricInfo> fabric_info = GetDeviceFabricInfo(*device);
         if (fabric_info.ok()) {
           info.cluster_uuid = fabric_info->cluster_uuid;

@@ -467,7 +467,7 @@ dot_fusion {
   p0 = f32[128, 257] parameter(0)
   p1 = f32[257, 64] parameter(1)
   exp = f32[128, 257] exponential(p0)
-  ROOT dot = f32[128, 64] dot(exp, p1), lhs_contracting_dims={1}, rhs_contracting_dims={0}
+  ROOT dot = f32[128, 64] dot(exp, p1), lhs_contracting_dims={1}, rhs_contracting_dims={0}, backend_config={sizes:[64]}
 }
 
 ENTRY main {
@@ -480,9 +480,8 @@ ENTRY main {
       module->entry_computation()->root_instruction());
 
   auto result = indexing_cost_model_.EstimateRunTimeForTiledFusion(
-      *fusion_adaptor,
-      BlockLevelParameters{/*output_tile_sizes=*/{{64, 32, 32}},
-                           /*num_warps=*/32});
+      *fusion_adaptor, BlockLevelParameters{/*output_tile_sizes=*/{{32, 32}},
+                                            /*num_warps=*/32});
 
   int64_t num_blocks = 8;
 
@@ -598,8 +597,9 @@ ENTRY main {
   EXPECT_TRUE(res3.IsInfinite());
 }
 
-TEST_F(GpuIndexingPerformanceModelTest,
-       EstimateRunTimeForTiledFusion_UsesPaddedTileSizeForMemoryAccessTime) {
+TEST_F(
+    GpuIndexingPerformanceModelTest,
+    EstimateRunTimeForTiledFusion_UsesHloDimensionSizeWhenTileCoversFullDimensionForMemoryAccessTime) {  // NOLINT(whitespace/line_length)
   TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnVerifiedModule(R"(
 HloModule m
 
