@@ -877,6 +877,48 @@ TEST_F(TritonAlgorithmTest, Dot_BF16_X6_WithConst) {
       kHloText, ErrorSpec{/*aabs=*/1e-6, /*arel=*/1e-6}));
 }
 
+TEST_F(TritonAlgorithmTest, UnsetAlgorithmToBF16) {
+  constexpr absl::string_view kHloText = R"hlo(
+    HloModule UnsetAlgorithmToBF16
+
+    triton_fusion_dot {
+      p0 = f32[256,256] parameter(0)
+      p1 = f32[256,256] parameter(1)
+      ROOT dot = f32[256,256] dot(p0, p1),
+          lhs_contracting_dims={0},
+          rhs_contracting_dims={1}
+    }
+
+    ENTRY entry_computation {
+      p0 = f32[256,256] parameter(0)
+      p1 = f32[256,256] parameter(1)
+      ROOT root = f32[256,256] fusion(p0, p1),
+        kind=kCustom,
+        calls=triton_fusion_dot,
+        backend_config={
+          "fusion_backend_config":{
+            "kind":"__triton_nested_gemm_fusion",
+            "block_level_fusion_config":{
+              "output_tiles": [{"sizes": ["16","256","16"]}],
+              "num_stages":4,
+              "num_warps":4,
+              "num_ctas":1
+            }},
+          "force_earliest_schedule":false
+        }
+    }
+  )hlo";
+  ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnVerifiedModule(kHloText));
+  module->mutable_config()
+      .mutable_debug_options()
+      .set_xla_gpu_default_to_alg_dot_bf16_bf16_f32(true);
+  EXPECT_OK(
+      CreateTritonIrAndFileCheckForDot(module.get(), "triton_fusion_dot", R"(
+      CHECK: tt.dot{{.*}}tensor<256x16xbf16> * tensor<16x16xbf16> -> tensor<256x16xf32>
+    )"))
+      << "Arguments should be converted to BF16.";
+}
+
 using PC = PrecisionConfig;
 using ::testing::TestParamInfo;
 using ::testing::WithParamInterface;
@@ -1662,8 +1704,9 @@ double GetMaxRelErrorForSmallContractingDim(Backend backend,
   //
   // Thus, they do not actually depend on k, since f32 has much higher precision
   // than the rounding mode.
-  const absl::flat_hash_map<PC::Algorithm, double> kMaxMeanRelErrorTriton = {
-      {PC::ALG_DOT_BF16_BF16_F32, 1.6e-2},
+  const absl::flat_hash_map<PC::Algorithm, double> kMaxAbsRelErrorTriton = {
+      {PC::ALG_UNSET, 3.3e-3},
+      {PC::ALG_DOT_BF16_BF16_F32, 3.3e-3},
       {PC::ALG_DOT_TF32_TF32_F32, 2.0e-3},
       // TODO: b/407744579 - Understand what the expected error is with various
       // precision-recovering algorithms. For now we just use the errors that
@@ -1674,7 +1717,8 @@ double GetMaxRelErrorForSmallContractingDim(Backend backend,
       {PC::ALG_DOT_TF32_TF32_F32_X3, 5e-7},
       {PC::ALG_DOT_F32_F32_F32, 2e-07}};
 
-  const absl::flat_hash_map<PC::Algorithm, double> kMaxMeanRelErrorBlas = {
+  const absl::flat_hash_map<PC::Algorithm, double> kMaxAbsRelErrorBlas = {
+      {PC::ALG_UNSET, 3.3e-3},
       {PC::ALG_DOT_BF16_BF16_F32, 3.3e-3},
       {PC::ALG_DOT_TF32_TF32_F32, 4.1e-4},
       {PC::ALG_DOT_BF16_BF16_F32_X3, 2.4e-5},
@@ -1683,14 +1727,14 @@ double GetMaxRelErrorForSmallContractingDim(Backend backend,
       {PC::ALG_DOT_BF16_BF16_F32_X9, 6e-8},
       {PC::ALG_DOT_F32_F32_F32, 2e-07}};
   if (backend == Backend::kTriton) {
-    auto max_rel_error_it = kMaxMeanRelErrorTriton.find(algorithm);
-    CHECK(max_rel_error_it != kMaxMeanRelErrorTriton.end());
+    auto max_rel_error_it = kMaxAbsRelErrorTriton.find(algorithm);
+    CHECK(max_rel_error_it != kMaxAbsRelErrorTriton.end());
     return max_rel_error_it->second;
   }
 
   if (backend == Backend::kBlas) {
-    auto max_rel_error_it = kMaxMeanRelErrorBlas.find(algorithm);
-    CHECK(max_rel_error_it != kMaxMeanRelErrorBlas.end());
+    auto max_rel_error_it = kMaxAbsRelErrorBlas.find(algorithm);
+    CHECK(max_rel_error_it != kMaxAbsRelErrorBlas.end());
     return max_rel_error_it->second;
   }
 
@@ -1854,6 +1898,11 @@ class PrecisionTests
                         ParseAndReturnVerifiedModule(hlo_text));
     auto debug_options = module->config().debug_options();
     debug_options.set_xla_gpu_enable_split_k_autotuning(false);
+    if (algorithm == PC::ALG_UNSET) {
+      // Here we test that the default algorithm for f32 dots is
+      // ALG_DOT_BF16_BF16_F32 if the flag is set.
+      debug_options.set_xla_gpu_default_to_alg_dot_bf16_bf16_f32(true);
+    }
     if (backend == Backend::kTriton) {
       debug_options.set_xla_gpu_enable_triton_gemm(true);
       debug_options.set_xla_gpu_cublas_fallback(false);
@@ -2060,9 +2109,9 @@ TEST_P(PrecisionTests, CheckPrecisionDegradationAlongKDimension) {
 
 INSTANTIATE_TEST_SUITE_P(
     PrecisionTests, PrecisionTests,
-    Combine(Values(PC::ALG_DOT_TF32_TF32_F32, PC::ALG_DOT_TF32_TF32_F32_X3,
-                   PC::ALG_DOT_BF16_BF16_F32, PC::ALG_DOT_BF16_BF16_F32_X3,
-                   PC::ALG_DOT_BF16_BF16_F32_X6,
+    Combine(Values(PC::ALG_UNSET, PC::ALG_DOT_TF32_TF32_F32,
+                   PC::ALG_DOT_TF32_TF32_F32_X3, PC::ALG_DOT_BF16_BF16_F32,
+                   PC::ALG_DOT_BF16_BF16_F32_X3, PC::ALG_DOT_BF16_BF16_F32_X6,
                    // TODO(basioli): re-enable this algorithm testing once the
                    // attribute
                    // importer supports the conversion.

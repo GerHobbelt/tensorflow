@@ -94,6 +94,28 @@ namespace xla {
 namespace memory_space_assignment {
 namespace {
 
+HloPosition GetNonTrivialSourcePosition(HloPosition position) {
+  while (position.instruction->opcode() == HloOpcode::kGetTupleElement ||
+         position.instruction->opcode() == HloOpcode::kTuple ||
+         position.instruction->opcode() == HloOpcode::kBitcast) {
+    if (position.instruction->opcode() == HloOpcode::kGetTupleElement) {
+      int64_t tuple_index = position.instruction->tuple_index();
+      position.instruction = position.instruction->mutable_operand(0);
+      position.index.push_front(tuple_index);
+    } else if (position.instruction->opcode() == HloOpcode::kTuple) {
+      if (position.index.empty()) {
+        return position;
+      }
+      int64_t tuple_index = position.index.front();
+      position.index.pop_front();
+      position.instruction = position.instruction->mutable_operand(tuple_index);
+    } else if (position.instruction->opcode() == HloOpcode::kBitcast) {
+      position.instruction = position.instruction->mutable_operand(0);
+    }
+  }
+  return position;
+}
+
 // Define a dummy chunk for chunks that will be allocated in the default memory
 // space and for keeping track of number of asynchronous copies.
 const HeapSimulator::Chunk kDummyChunk =
@@ -1384,7 +1406,7 @@ bool MsaAlgorithm::IsAsyncConversionCandidate(
                "output value is in the root of the computation.";
     return false;
   }
-  if (finalized_values_.contains(&value)) {
+  if (IsValueFinalized(&value)) {
     VLOG(4) << "The instruction is not considered to be replaced, because its "
                "output value is in the finalized values.";
     return false;
@@ -1639,7 +1661,7 @@ void MsaAlgorithm::CreateAllocationValuesForJointProcessedValues(
   for (auto& interval_hlo : proposal.values) {
     auto& interval = buffer_intervals_.at(interval_hlo);
 
-    if (finalized_values_.contains(interval_hlo)) {
+    if (IsValueFinalized(interval_hlo)) {
       VLOG(3) << "Skip " << interval.buffer->ToShortString()
               << " because it is already processed.";
       continue;
@@ -2209,11 +2231,9 @@ absl::Status MsaAlgorithm::AllocateAndScheduleExistingBlockPrefetches(
 
   // Erase all the values from block_prefetched_values that have been finalized.
   block_prefetched_values.erase(
-      std::remove_if(block_prefetched_values.begin(),
-                     block_prefetched_values.end(),
-                     [&](const HloValue* value) {
-                       return finalized_values_.contains(value);
-                     }),
+      std::remove_if(
+          block_prefetched_values.begin(), block_prefetched_values.end(),
+          [&](const HloValue* value) { return IsValueFinalized(value); }),
       block_prefetched_values.end());
 
   // Sort block prefetched values in ascending order of first use time.
@@ -2350,11 +2370,11 @@ absl::Status MsaAlgorithm::AllocateAndScheduleExistingBlockPrefetches(
     }
 
     // 3. Add the copy done and copy start values to the finalized values set.
-    finalized_values_.insert(prefetch_done_value);
+    FinalizeValue(prefetch_done_value);
     const HloValue* copy_start_value =
         &alias_analysis_.dataflow_analysis().GetUniqueValueAt(
             async_mem_op_start, {0});
-    finalized_values_.insert(copy_start_value);
+    FinalizeValue(copy_start_value);
 
     // 4. Add a repack allocation block to the repack allocation blocks list.
     repack_allocation_blocks_.push_back(MakeRepackAllocationBlock(
@@ -2387,7 +2407,7 @@ absl::Status MsaAlgorithm::AllocateAndScheduleExistingBlockPrefetches(
     const HloBuffer& buffer =
         alias_analysis_.GetBufferContainingValue(*original_value);
     for (const HloValue* aliased_value : buffer.values()) {
-      if (finalized_values_.contains(aliased_value)) {
+      if (IsValueFinalized(aliased_value)) {
         continue;
       }
       // If a pinned allocation already exists for the aliased value, add the
@@ -2402,7 +2422,7 @@ absl::Status MsaAlgorithm::AllocateAndScheduleExistingBlockPrefetches(
           }
         }
       }
-      finalized_values_.insert(aliased_value);
+      FinalizeValue(aliased_value);
     }
   }
 
@@ -2460,7 +2480,7 @@ void MsaAlgorithm::ColocateAndFinalizeValuesAliasedToExistingBlockPrefetches(
   // values.
   for (int i = 2; i < colocated_values.size(); ++i) {
     const HloValue* aliased_value = colocated_values[i];
-    CHECK(!finalized_values_.contains(aliased_value));
+    CHECK(!IsValueFinalized(aliased_value));
     int64_t aliased_value_definition_time =
         instruction_schedule.at(aliased_value->defining_instruction());
     CHECK_LT(maybe_sliced_value_definition_time, aliased_value_definition_time);
@@ -2511,7 +2531,7 @@ void MsaAlgorithm::ColocateAndFinalizeValuesAliasedToExistingBlockPrefetches(
         std::lower_bound(prefetch_end_times.begin(), prefetch_end_times.end(),
                          aliased_value_last_use_time);
     prefetch_end_times.insert(sorted_position, aliased_value_last_use_time);
-    finalized_values_.insert(aliased_value);
+    FinalizeValue(aliased_value);
     repack_allocation_blocks_.push_back(MakeRepackAllocationBlock(
         aliased_value_definition_time, aliased_value_last_use_time,
         aliased_chunk_candidate.size, aliased_chunk_candidate.offset,
@@ -2547,22 +2567,34 @@ absl::Status MsaAlgorithm::CreateNewBlockPrefetches(
     const HloValue* value =
         &alias_analysis_.dataflow_analysis().GetUniqueValueAt(
             position.instruction, position.index);
-    if (!aliased_parameter_positions.contains(value->defining_position())) {
+    if (!aliased_parameter_positions.contains(value->defining_position()) &&
+        IsAsyncConversionSliceCandidate(value->defining_instruction()) !=
+            AsyncConversionResult::kSuccess) {
       block_prefetched_values.push_back(value);
+      VLOG(3) << "Block prefetched value: " << value->ToShortString();
     } else {
+      // We will not add this value to block_prefetched_values if it is an
+      // aliased parameter or an async conversion slice candidate. But we can
+      // add the async conversion slice candidates of this value to
+      // block_prefetched_values in the next loop.
       // TODO(b/441344194): Add support for block allocations for parameters
       // that are aliased to outputs.
       LOG(WARNING) << "Skipping block prefetch for value: "
                    << position.ToString()
                    << " because it is aliased to a program output.";
     }
-
     // As mentioned above, we also track slices of block prefetched values.
     for (const HloUse& use : value->GetUses()) {
-      if (use.instruction->opcode() == HloOpcode::kSlice) {
+      if (IsAsyncConversionSliceCandidate(use.instruction) ==
+              AsyncConversionResult::kSuccess &&
+          IsAsyncConversionSliceCandidate(value->defining_instruction()) !=
+              AsyncConversionResult::kSuccess) {
         const HloValue* slice_value =
             &alias_analysis_.dataflow_analysis().GetUniqueValueAt(
                 use.instruction, {});
+        VLOG(3) << "Block prefetched slice value: ("
+                << slice_value->ToShortString() << ") for original value: ("
+                << value->ToShortString() << ")";
         block_prefetched_values.push_back(slice_value);
         sliced_value_to_original_value[slice_value] = value;
       }
@@ -2578,13 +2610,23 @@ absl::Status MsaAlgorithm::CreateNewBlockPrefetches(
     use_interval.last_use_time = -1;
     bool is_original_value = !sliced_value_to_original_value.contains(value);
     for (const HloUse& use : value->GetUses()) {
-      // We skip slices here because they have been explicitly added to
-      // block_prefetched_values and will be handled in the outer for loop.
-      if (is_original_value && use.instruction->opcode() == HloOpcode::kSlice) {
+      // We skip async conversion candidates here because they have been
+      // explicitly added to block_prefetched_values as block prefetch
+      // candidates themselves and will be handled in the outer for loop.
+      if (is_original_value &&
+          IsAsyncConversionSliceCandidate(use.instruction) ==
+              AsyncConversionResult::kSuccess) {
         continue;
+      }
+      if (use.instruction->opcode() == HloOpcode::kWhile) {
+        use_interval.last_use_time = -1;
+        break;
       }
       auto it = instruction_schedule.find(use.instruction);
       if (it == instruction_schedule.end()) {
+        continue;
+      }
+      if (!options_.is_use_allowed_in_alternate_mem_fn(use)) {
         continue;
       }
       use_interval.first_use_time =
@@ -2597,25 +2639,25 @@ absl::Status MsaAlgorithm::CreateNewBlockPrefetches(
   // Finalize all the values that have no uses.
   for (const auto& [value, use_interval] : value_to_use_intervals) {
     if (use_interval.last_use_time == -1) {
-      finalized_values_.insert(value);
+      FinalizeValue(value);
     }
   }
 
   // Erase all the values from block_prefetched_values that have been finalized.
   block_prefetched_values.erase(
-      std::remove_if(block_prefetched_values.begin(),
-                     block_prefetched_values.end(),
-                     [&](const HloValue* value) {
-                       return finalized_values_.contains(value);
-                     }),
+      std::remove_if(
+          block_prefetched_values.begin(), block_prefetched_values.end(),
+          [&](const HloValue* value) { return IsValueFinalized(value); }),
       block_prefetched_values.end());
 
   // Sort block prefetched value values in ascending order of first use time.
-  absl::c_sort(block_prefetched_values,
-               [&](const HloValue* a, const HloValue* b) {
-                 return value_to_use_intervals.at(a).first_use_time <
-                        value_to_use_intervals.at(b).first_use_time;
-               });
+  absl::c_sort(
+      block_prefetched_values, [&](const HloValue* a, const HloValue* b) {
+        return std::forward_as_tuple(
+                   value_to_use_intervals.at(a).first_use_time, a->id()) <
+               std::forward_as_tuple(
+                   value_to_use_intervals.at(b).first_use_time, b->id());
+      });
 
   int64_t block_prefetching_limit_bytes =
       block_prefetching_starting_offset +
@@ -2629,7 +2671,9 @@ absl::Status MsaAlgorithm::CreateNewBlockPrefetches(
   std::vector<int64_t> prefetch_end_times;
   std::vector<int64_t> prefetch_done_schedule_before_times;
 
-  absl::flat_hash_map<const HloValue*, Allocation*> value_to_pinned_allocation;
+  absl::flat_hash_map<HloPosition, Allocation*>
+      allocation_value_position_to_pinned_allocation;
+  absl::flat_hash_set<HloPosition> positions_pinned_to_default_memory;
 
   // For each block prefetched value, we try to find a chunk within the block
   // prefetching limit, ensuring FIFO ordering. After a suitable chunk is found
@@ -2647,20 +2691,40 @@ absl::Status MsaAlgorithm::CreateNewBlockPrefetches(
   //    already colocated with the prefetch and finalized to the alternate
   //    memory. If the block prefetch failed, finalize source and its aliases
   //    to default memory.
-  // 7. Clear the pending chunks after the loop.
+  // 7. For all the positions for which we have created a pinned allocation in
+  //    the default memory, finalize all the values in the buffer in the
+  //    default memory.
+  // 8. Clear the pending chunks after the loop.
   for (const HloValue* maybe_sliced_value : block_prefetched_values) {
     UseInterval use_interval = value_to_use_intervals.at(maybe_sliced_value);
     int64_t first_use_time = use_interval.first_use_time;
     int64_t last_use_time = use_interval.last_use_time;
-    auto it = sliced_value_to_original_value.find(maybe_sliced_value);
+    auto sliced_to_original_value_it =
+        sliced_value_to_original_value.find(maybe_sliced_value);
     const HloValue* original_value;
-    if (it != sliced_value_to_original_value.end()) {
-      original_value = it->second;
+    HloPosition defining_position;
+    bool is_async_conversion_slice =
+        sliced_to_original_value_it != sliced_value_to_original_value.end();
+    if (is_async_conversion_slice) {
+      original_value = sliced_to_original_value_it->second;
+      defining_position = GetNonTrivialSourcePosition(
+          {maybe_sliced_value->defining_instruction()->mutable_operand(0), {}});
     } else {
       original_value = maybe_sliced_value;
+      defining_position = maybe_sliced_value->defining_position();
     }
     int64_t definition_time =
-        instruction_schedule.at(original_value->defining_instruction());
+        instruction_schedule.at(defining_position.instruction);
+    if (is_async_conversion_slice) {
+      for (HloInstruction* operand :
+           maybe_sliced_value->defining_instruction()->operands()) {
+        HloPosition operand_position =
+            GetNonTrivialSourcePosition({operand, {}});
+        definition_time =
+            std::max(definition_time,
+                     instruction_schedule.at(operand_position.instruction));
+      }
+    }
     int64_t end_time = last_use_time;
     int64_t buffer_size = buffer_intervals_.at(maybe_sliced_value).size;
     // Find the earliest start time for which a chunk can be allocated for the
@@ -2694,14 +2758,20 @@ absl::Status MsaAlgorithm::CreateNewBlockPrefetches(
     // Add a pinned allocation in the default memory to serve as the prev
     // allocation for the copy allocation or extend the existing pinned
     // allocation.
-    auto pinned_allocation_it = value_to_pinned_allocation.find(original_value);
+    auto pinned_allocation_it =
+        allocation_value_position_to_pinned_allocation.find(defining_position);
     Allocation* pinned_allocation;
-    if (pinned_allocation_it == value_to_pinned_allocation.end()) {
+    if (pinned_allocation_it ==
+        allocation_value_position_to_pinned_allocation.end()) {
       allocations_->push_back(std::make_unique<PinnedAllocation>(
-          original_value->defining_position(), MemorySpace::kDefault,
-          kDummyChunk, definition_time, end_time));
-      value_to_pinned_allocation[original_value] = allocations_->back().get();
+          defining_position, MemorySpace::kDefault, kDummyChunk,
+          definition_time, end_time));
+      allocation_value_position_to_pinned_allocation[defining_position] =
+          allocations_->back().get();
       pinned_allocation = allocations_->back().get();
+      AddRequiredAssignment(defining_position, MemorySpace::kDefault,
+                            "block prefetched position", nullptr, false);
+      positions_pinned_to_default_memory.insert(defining_position);
     } else {
       pinned_allocation = pinned_allocation_it->second;
       pinned_allocation->Extend(end_time);
@@ -2737,9 +2807,13 @@ absl::Status MsaAlgorithm::CreateNewBlockPrefetches(
 
     for (const HloUse& use : maybe_sliced_value->GetUses()) {
       if (original_value == maybe_sliced_value &&
-          use.instruction->opcode() == HloOpcode::kSlice) {
+          IsAsyncConversionSliceCandidate(use.instruction) ==
+              AsyncConversionResult::kSuccess) {
         // The use is a slice of the original value, so we don't need to add it
         // to the alternate memory map or to the uses of the copy allocation.
+        continue;
+      }
+      if (!options_.is_use_allowed_in_alternate_mem_fn(use)) {
         continue;
       }
       if (use.instruction->parent() ==
@@ -2752,7 +2826,7 @@ absl::Status MsaAlgorithm::CreateNewBlockPrefetches(
     }
 
     // 3. Add the value to the finalized values set.
-    finalized_values_.insert(maybe_sliced_value);
+    FinalizeValue(maybe_sliced_value);
     // 4. Add a repack allocation block to the repack allocation blocks list.
     repack_allocation_blocks_.push_back(MakeRepackAllocationBlock(
         start_time, end_time, chunk_candidate.size, chunk_candidate.offset,
@@ -2785,26 +2859,44 @@ absl::Status MsaAlgorithm::CreateNewBlockPrefetches(
     const HloBuffer& buffer =
         alias_analysis_.GetBufferContainingValue(*original_value);
     for (const HloValue* aliased_value : buffer.values()) {
-      if (finalized_values_.contains(aliased_value)) {
+      if (IsValueFinalized(aliased_value)) {
         continue;
       }
-      // If a pinned allocation already exists for the aliased value, add the
-      // uses of the original value to the pinned allocation.
-      auto it = value_to_pinned_allocation.find(aliased_value);
-      if (it != value_to_pinned_allocation.end()) {
-        Allocation* allocation = it->second;
-        for (const HloUse& use : original_value->GetUses()) {
-          if (use.instruction->parent() ==
-              original_value->instruction()->parent()) {
-            allocation->AddUse(use);
-          }
-        }
+      // Finalize the aliased value to default memory and add required
+      // assignments for its uses in default memory.
+      for (const HloUse& use : aliased_value->GetUses()) {
+        AddRequiredAssignment(use, MemorySpace::kDefault,
+                              "block prefetched buffer use", nullptr, false);
       }
-      finalized_values_.insert(aliased_value);
+      AddRequiredAssignment(aliased_value->defining_position(),
+                            MemorySpace::kDefault, "block prefetched buffer",
+                            nullptr, false);
+      FinalizeValue(aliased_value);
     }
   }
 
-  // 7. Clear the pending chunks.
+  // 7. For all the positions for which we have created a pinned allocation in
+  //    the default memory, finalize all the values in the buffer in the
+  //    default memory.
+  for (const HloPosition& position : positions_pinned_to_default_memory) {
+    const HloBuffer& buffer =
+        alias_analysis_.GetUniqueBufferAt(position.instruction, position.index);
+    for (const HloValue* aliased_value : buffer.values()) {
+      if (IsValueFinalized(aliased_value)) {
+        continue;
+      }
+      for (const HloUse& use : aliased_value->GetUses()) {
+        AddRequiredAssignment(use, MemorySpace::kDefault,
+                              "block prefetched buffer use", nullptr, false);
+      }
+      AddRequiredAssignment(aliased_value->defining_position(),
+                            MemorySpace::kDefault, "block prefetched buffer",
+                            nullptr, false);
+      FinalizeValue(aliased_value);
+    }
+  }
+
+  // 8. Clear the pending chunks.
   ClearPendingChunks();
   return absl::OkStatus();
 }
@@ -2857,7 +2949,7 @@ void MsaAlgorithm::ColocateAndFinalizeValuesAliasedToNewBlockPrefetches(
   // the alternate memory.
   for (int i = 0; i < colocated_values.size(); ++i) {
     const HloValue* aliased_value = colocated_values[i];
-    CHECK(!finalized_values_.contains(aliased_value));
+    CHECK(!IsValueFinalized(aliased_value));
     int64_t aliased_value_definition_time =
         instruction_schedule.at(aliased_value->defining_instruction());
     CHECK_LT(maybe_sliced_value_definition_time, aliased_value_definition_time);
@@ -2908,7 +3000,7 @@ void MsaAlgorithm::ColocateAndFinalizeValuesAliasedToNewBlockPrefetches(
         std::lower_bound(prefetch_end_times.begin(), prefetch_end_times.end(),
                          aliased_value_last_use_time);
     prefetch_end_times.insert(sorted_position, aliased_value_last_use_time);
-    finalized_values_.insert(aliased_value);
+    FinalizeValue(aliased_value);
     repack_allocation_blocks_.push_back(MakeRepackAllocationBlock(
         aliased_value_definition_time, aliased_value_last_use_time,
         aliased_chunk_candidate.size, aliased_chunk_candidate.offset,
@@ -3164,7 +3256,7 @@ absl::StatusOr<HeapSimulator::Result<HloValue>> MsaAlgorithm::Finish() {
   VLOG(2) << "Total reserved bytes = " << reserved_in_bytes_;
   for (MsaBufferInterval& interval : sorted_buffer_intervals) {
     VLOG(3) << "Processing buffer: " << interval.buffer->ToString();
-    if (finalized_values_.contains(interval.buffer)) {
+    if (IsValueFinalized(interval.buffer)) {
       VLOG(3) << "Skip entrance interval" << interval.buffer->ToShortString()
               << " because it is already processed.";
       continue;
@@ -3208,7 +3300,7 @@ absl::StatusOr<HeapSimulator::Result<HloValue>> MsaAlgorithm::Finish() {
               "no sync replacement is enabled.");
         }
 
-        UncommitPendingChunks(absl::MakeSpan(proposal.allocation_values));
+        UncommitPendingWork(absl::MakeSpan(proposal.allocation_values));
         proposal = GetJointProposal(interval);
         if (proposal.allocation_values.empty()) {
           VLOG(3)
@@ -3219,7 +3311,7 @@ absl::StatusOr<HeapSimulator::Result<HloValue>> MsaAlgorithm::Finish() {
         --retry_number;
 
       } else if (result_requires_uncommit(result)) {
-        UncommitPendingChunks(absl::MakeSpan(proposal.allocation_values));
+        UncommitPendingWork(absl::MakeSpan(proposal.allocation_values));
         VLOG(2) << "Couldn't allocate. Retry number " << retry_number;
         if (retry_number > 0 && !sorted_async_conversion_candidates_.empty()) {
           failed_async_conversions_[sorted_async_conversion_candidates_.at(0)] =
@@ -3233,7 +3325,7 @@ absl::StatusOr<HeapSimulator::Result<HloValue>> MsaAlgorithm::Finish() {
                   options_.repack_after_every_allocation) &&
                  num_repacks_ < options_.max_repacks && !repacked &&
                  !RepackAllocationsIncludeConvertedSyncMemOp()) {
-        UncommitPendingChunks(absl::MakeSpan(proposal.allocation_values));
+        UncommitPendingWork(absl::MakeSpan(proposal.allocation_values));
         ++num_repacks_;
         repacked = true;
         if (!options_.repacker) {
@@ -3282,7 +3374,7 @@ absl::StatusOr<HeapSimulator::Result<HloValue>> MsaAlgorithm::Finish() {
           }
         }
         if (!inefficient_sites.empty()) {
-          UncommitPendingChunks(absl::MakeSpan(proposal.allocation_values));
+          UncommitPendingWork(absl::MakeSpan(proposal.allocation_values));
           for (const HloPositionOrUse& site : inefficient_sites) {
             // To avoid a livelock situation, we commit the required assignments
             // right away. Otherwise, reallocation can find alternate memory
@@ -3308,7 +3400,7 @@ absl::StatusOr<HeapSimulator::Result<HloValue>> MsaAlgorithm::Finish() {
     // Keep track of the processed values to prevent double-processing in future
     // joint-processed intervals.
     for (auto& value : proposal.values) {
-      finalized_values_.insert(value);
+      FinalizeValue(value);
     }
   }
 
@@ -4037,7 +4129,9 @@ absl::StatusOr<AllocationResult> MsaAlgorithm::AllocateAllocationValues(
                 << ResultToString(allocate_segment_result);
         result_mark(allocate_segment_result, result);
         if (options_.allocation_result_modifier_testing_fn) {
-          options_.allocation_result_modifier_testing_fn(request, result);
+          options_.allocation_result_modifier_testing_fn(
+              request, result,
+              options_.prefetch_interval_picker->retry_number());
         }
         if (request.require_copy_allocation) {
           auto allocation_sequence =
@@ -5736,7 +5830,7 @@ void MsaAlgorithm::ImportRepackedSlicedAllocation(
   // described in
   // MsaAlgorithm::PrefetchContext::SlicedSolution::slices_for_pending_chunks.
   // Doing so was for the benefit of MsaAlgorithm::pending_chunks_. However,
-  // pending_chunks_ are cleared before repacking, when UncommitPendingChunks()
+  // pending_chunks_ are cleared before repacking, when UncommitPendingWork()
   // is called. Thus, we don't need to worry about modifying the chunks here.
   for (const SliceDetail& slice_detail :
        allocation->slice_details_sorted_by_start_time()) {
@@ -5811,7 +5905,7 @@ absl::Status MsaAlgorithm::AreRepackedSlicesValid(
   return absl::OkStatus();
 }
 
-void MsaAlgorithm::UncommitPendingChunks(
+void MsaAlgorithm::UncommitPendingWork(
     absl::Span<AllocationValue> allocation_values) {
   // Clear the allocation sequence of the allocation values so that in case we
   // retry allocation after uncommitting.
@@ -5871,6 +5965,27 @@ void MsaAlgorithm::UncommitPendingChunks(
         break;
       }
     }
+  }
+  // As part of the uncommit, we need to re-reserve the previously freed chunks,
+  // corresponding to the deallocated reserved allocations that were pending.
+  for (const auto& allocation : pending_deallocated_reserved_allocations_) {
+    MsaBufferInterval interval =
+        MsaBufferInterval{/*buffer=*/nullptr,
+                          /*size=*/allocation->chunk().size,
+                          /*start=*/allocation->start_time(),
+                          /*end=*/allocation->end_time(),
+                          /*colocations=*/{},
+                          /*need_allocation=*/true};
+    Chunk chunk_candidate = FindChunkCandidate(
+        interval, /*preferred_offset=*/allocation->chunk().offset);
+    CHECK_EQ(chunk_candidate.offset, allocation->chunk().offset);
+    CommitChunk(interval, chunk_candidate);
+    allocation->mark_chunk_reserved_in_interval_tree();
+    repack_allocation_blocks_.push_back(MakeRepackAllocationBlock(
+        allocation->start_time(), allocation->end_time(), chunk_candidate.size,
+        chunk_candidate.offset, allocation));
+    repack_allocation_blocks_.back().next_colocated =
+        &(repack_allocation_blocks_.back());
   }
   ClearPendingChunks();
 }
@@ -5955,6 +6070,7 @@ void MsaAlgorithm::ClearPendingChunks() {
   pending_required_assignments_.clear();
   aliased_offset_map_.clear();
   aliased_offsets_.clear();
+  pending_deallocated_reserved_allocations_.clear();
 }
 
 bool MsaAlgorithm::IsInstructionPendingReplacements(
@@ -6098,9 +6214,6 @@ void MsaAlgorithm::CheckAndUpdateForDualLiveAllocationValues(
 
 void MsaAlgorithm::ReleaseReservedAllocationForAlternateMemoryColorings(
     ReservedAllocation* reserved_allocation) {
-  // We check if the reserved chunk is still reserved because this might
-  // be a retry of the same allocation request and the chunk might have
-  // been released in the previous attempt.
   if (!reserved_allocation->is_chunk_reserved_in_interval_tree()) {
     return;
   }
@@ -6108,7 +6221,8 @@ void MsaAlgorithm::ReleaseReservedAllocationForAlternateMemoryColorings(
   CHECK(interval_tree_.Remove(reserved_allocation->start_time(),
                               reserved_allocation->end_time(),
                               reserved_allocation->chunk()));
-  reserved_allocation->chunk_freed_in_interval_tree();
+  reserved_allocation->mark_chunk_freed_in_interval_tree();
+  pending_deallocated_reserved_allocations_.push_back(reserved_allocation);
   size_t original_size = repack_allocation_blocks_.size();
   repack_allocation_blocks_.remove_if(
       [reserved_allocation](

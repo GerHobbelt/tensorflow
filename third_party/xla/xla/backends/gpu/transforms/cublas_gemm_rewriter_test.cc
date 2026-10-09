@@ -3743,10 +3743,10 @@ TEST_F(GroupedGemmRewriteTest, CustomCallTargetGroupedGemm) {
 HloModule GroupedGemm
 
 ENTRY AddRaggedDotsFunc {
-    p0 = bf16[64,9]{1,0} parameter(0)
-    p1 = bf16[2,9,8]{2,1,0} parameter(1)
+    p0 = f16[64,9]{1,0} parameter(0)
+    p1 = f16[2,9,8]{2,1,0} parameter(1)
     p2 = s32[2] constant({16, 48})
-    ROOT ragged-dot = bf16[64,8]{1,0} ragged-dot(p0, p1, p2),
+    ROOT ragged-dot = f16[64,8]{1,0} ragged-dot(p0, p1, p2),
                       lhs_contracting_dims={1}, rhs_contracting_dims={1},
                       lhs_ragged_dims={0}, rhs_group_dims={0}
 }
@@ -3754,7 +3754,7 @@ ENTRY AddRaggedDotsFunc {
   MatchOptimizedHlo(hlo_text,
                     R"(
                     ; CHECK: custom_call_target="__cublas$lt$groupedMatmul",
-                    ; CHECK-SAME: backend_config={"operation_queue_id":"0","wait_on_operation_queues":[],
+                    ; CHECK-SAME: backend_config={"operation_queue_id":"0",
                     ; CHECK-SAME: "force_earliest_schedule":false,"reification_cost":[],
                     ; CHECK-SAME: "device_type":"DEVICE_TYPE_INVALID",
                     ; CHECK-SAME: "grouped_gemm_backend_config":{
@@ -3781,11 +3781,11 @@ TEST_F(GroupedGemmRewriteTest, CustomCallTargetGroupedGemmLargeGroupCount600) {
 HloModule GroupedGemmLarge600
 
 ENTRY AddRaggedDotsFunc {
-    p0 = bf16[2400,9]{1,0} parameter(0)
-    p1 = bf16[600,9,8]{2,1,0} parameter(1)
+    p0 = f16[2400,9]{1,0} parameter(0)
+    p1 = f16[600,9,8]{2,1,0} parameter(1)
     scalar = s32[] constant(4)
     p2 = s32[600] broadcast(scalar), dimensions={}
-    ROOT ragged-dot = bf16[2400,8]{1,0} ragged-dot(p0, p1, p2),
+    ROOT ragged-dot = f16[2400,8]{1,0} ragged-dot(p0, p1, p2),
                       lhs_contracting_dims={1}, rhs_contracting_dims={1},
                       lhs_ragged_dims={0}, rhs_group_dims={0}
 }
@@ -3798,10 +3798,10 @@ TEST_F(GroupedGemmRewriteTest, CustomCallTargetGroupedGemmMulipleGroups) {
 HloModule GroupedGemm
 
 ENTRY AddRaggedDotsFunc {
-    p0 = bf16[64,9]{1,0} parameter(0)
-    p1 = bf16[4,9,8]{2,1,0} parameter(1)
-    p2 = s32[4] constant({16, 8, 24, 16})
-    ROOT ragged-dot = bf16[64,8]{1,0} ragged-dot(p0, p1, p2),
+    p0 = f16[64,9]{1,0} parameter(0)
+    p1 = f16[4,9,8]{2,1,0} parameter(1)
+    p2 = s64[4] constant({16, 8, 24, 16})
+    ROOT ragged-dot = f16[64,8]{1,0} ragged-dot(p0, p1, p2),
                       lhs_contracting_dims={1}, rhs_contracting_dims={1},
                       lhs_ragged_dims={0}, rhs_group_dims={0}
 }
@@ -3809,7 +3809,7 @@ ENTRY AddRaggedDotsFunc {
   MatchOptimizedHlo(hlo_text,
                     R"(
                     ; CHECK: custom_call_target="__cublas$lt$groupedMatmul",
-                    ; CHECK-SAME: backend_config={"operation_queue_id":"0","wait_on_operation_queues":[],
+                    ; CHECK-SAME: backend_config={"operation_queue_id":"0",
                     ; CHECK-SAME: "force_earliest_schedule":false,"reification_cost":[],
                     ; CHECK-SAME: "device_type":"DEVICE_TYPE_INVALID",
                     ; CHECK-SAME: "grouped_gemm_backend_config":{
@@ -3835,10 +3835,10 @@ TEST_F(GroupedGemmRewriteTest,
 HloModule GroupedGemm
 
 ENTRY AddRaggedDotsFunc {
-    p0 = bf16[64,9]{1,0} parameter(0)
-    p1 = bf16[4,9,8]{2,1,0} parameter(1)
+    p0 = f16[64,9]{1,0} parameter(0)
+    p1 = f16[4,9,8]{2,1,0} parameter(1)
     p2 = s64[4] constant({16, 8, 24, 16})
-    ROOT ragged-dot = bf16[64,8]{0,1} ragged-dot(p0, p1, p2),
+    ROOT ragged-dot = f16[64,8]{0,1} ragged-dot(p0, p1, p2),
                       lhs_contracting_dims={1}, rhs_contracting_dims={1},
                       lhs_ragged_dims={0}, rhs_group_dims={0}
 }
@@ -3846,7 +3846,7 @@ ENTRY AddRaggedDotsFunc {
   MatchOptimizedHlo(hlo_text,
                     R"(
                     ; CHECK: custom_call_target="__cublas$lt$groupedMatmul",
-                    ; CHECK-SAME: backend_config={"operation_queue_id":"0","wait_on_operation_queues":[],
+                    ; CHECK-SAME: backend_config={"operation_queue_id":"0",
                     ; CHECK-SAME: "force_earliest_schedule":false,"reification_cost":[],
                     ; CHECK-SAME: "device_type":"DEVICE_TYPE_INVALID",
                     ; CHECK-SAME: "grouped_gemm_backend_config":{
@@ -3872,10 +3872,10 @@ TEST_F(GroupedGemmRewriteTest,
 HloModule GroupedGemm
 
 ENTRY AddRaggedDotsFunc {
-    p0 = bf16[3,16,9]{2,1,0} parameter(0)
-    p1 = bf16[3,2,9,8]{3,2,1,0} parameter(1)
+    p0 = f16[3,16,9]{2,1,0} parameter(0)
+    p1 = f16[3,2,9,8]{3,2,1,0} parameter(1)
     p2 = s64[3, 2] constant({{4, 12}, {4, 12}, {4, 12}})
-    ROOT ragged-dot = bf16[3,16,8]{2,1,0} ragged-dot(p0, p1, p2),
+    ROOT ragged-dot = f16[3,16,8]{2,1,0} ragged-dot(p0, p1, p2),
                       lhs_contracting_dims={2}, rhs_contracting_dims={2},
                       lhs_batch_dims={0}, rhs_batch_dims={0},
                       lhs_ragged_dims={1}, rhs_group_dims={1}
@@ -3884,7 +3884,7 @@ ENTRY AddRaggedDotsFunc {
   MatchOptimizedHlo(hlo_text,
                     R"(
                     ; CHECK: custom_call_target="__cublas$lt$groupedMatmul",
-                    ; CHECK-SAME: backend_config={"operation_queue_id":"0","wait_on_operation_queues":[],
+                    ; CHECK-SAME: backend_config={"operation_queue_id":"0",
                     ; CHECK-SAME: "force_earliest_schedule":false,"reification_cost":[],
                     ; CHECK-SAME: "device_type":"DEVICE_TYPE_INVALID",
                     ; CHECK-SAME: "grouped_gemm_backend_config":{
@@ -3917,10 +3917,10 @@ TEST_F(GroupedGemmRewriteTest,
 HloModule GroupedGemm
 
 ENTRY AddRaggedDotsFunc {
-    p0 = bf16[64,9]{1,0} parameter(0)
-    p1 = bf16[9,8]{1,0} parameter(1)
+    p0 = f16[64,9]{1,0} parameter(0)
+    p1 = f16[9,8]{1,0} parameter(1)
     p2 = s64[2] constant({4, 5})
-    ROOT ragged-dot = bf16[2,64,8]{2,1,0} ragged-dot(p0, p1, p2),
+    ROOT ragged-dot = f16[2,64,8]{2,1,0} ragged-dot(p0, p1, p2),
                       lhs_contracting_dims={1}, rhs_contracting_dims={0},
                       lhs_ragged_dims={1}
 }
@@ -3928,7 +3928,7 @@ ENTRY AddRaggedDotsFunc {
   MatchOptimizedHlo(hlo_text,
                     R"(
                     ; CHECK: custom_call_target="__cublas$lt$groupedMatmul",
-                    ; CHECK-SAME: backend_config={"operation_queue_id":"0","wait_on_operation_queues":[],
+                    ; CHECK-SAME: backend_config={"operation_queue_id":"0",
                     ; CHECK-SAME: "force_earliest_schedule":false,"reification_cost":[],
                     ; CHECK-SAME: "device_type":"DEVICE_TYPE_INVALID",
                     ; CHECK-SAME: "grouped_gemm_backend_config":{
@@ -3954,10 +3954,10 @@ TEST_F(GroupedGemmRewriteTest,
 HloModule GroupedGemm
 
 ENTRY AddRaggedDotsFunc {
-    p0 = bf16[6,16]{1,0} parameter(0)
-    p1 = bf16[16,8]{1,0} parameter(1)
+    p0 = f16[64,16]{1,0} parameter(0)
+    p1 = f16[16,8]{1,0} parameter(1)
     p2 = s64[4] constant({4, 5, 3, 4})
-    ROOT ragged-dot = bf16[4,6,8]{2,1,0} ragged-dot(p0, p1, p2),
+    ROOT ragged-dot = f16[4,64,8]{2,1,0} ragged-dot(p0, p1, p2),
                       lhs_contracting_dims={1}, rhs_contracting_dims={0},
                       lhs_ragged_dims={1}
 }
@@ -3965,7 +3965,7 @@ ENTRY AddRaggedDotsFunc {
   MatchOptimizedHlo(hlo_text,
                     R"(
                     ; CHECK: custom_call_target="__cublas$lt$groupedMatmul",
-                    ; CHECK-SAME: backend_config={"operation_queue_id":"0","wait_on_operation_queues":[],
+                    ; CHECK-SAME: backend_config={"operation_queue_id":"0",
                     ; CHECK-SAME: "force_earliest_schedule":false,"reification_cost":[],
                     ; CHECK-SAME: "device_type":"DEVICE_TYPE_INVALID",
                     ; CHECK-SAME: "grouped_gemm_backend_config":{
@@ -3999,10 +3999,10 @@ TEST_F(
 HloModule GroupedGemm
 
 ENTRY AddRaggedDotsFunc {
-    p0 = bf16[64,16]{1,0} parameter(0)
-    p1 = bf16[16,8]{1,0} parameter(1)
+    p0 = f16[64,16]{1,0} parameter(0)
+    p1 = f16[16,8]{1,0} parameter(1)
     p2 = s64[4] constant({4, 5, 3, 4})
-    ROOT ragged-dot = bf16[4,64,8]{1,2,0} ragged-dot(p0, p1, p2),
+    ROOT ragged-dot = f16[4,64,8]{1,2,0} ragged-dot(p0, p1, p2),
                       lhs_contracting_dims={1}, rhs_contracting_dims={0},
                       lhs_ragged_dims={1}
 }
@@ -4010,7 +4010,7 @@ ENTRY AddRaggedDotsFunc {
   MatchOptimizedHlo(hlo_text,
                     R"(
                     ; CHECK: custom_call_target="__cublas$lt$groupedMatmul",
-                    ; CHECK-SAME: backend_config={"operation_queue_id":"0","wait_on_operation_queues":[],
+                    ; CHECK-SAME: backend_config={"operation_queue_id":"0",
                     ; CHECK-SAME: "force_earliest_schedule":false,"reification_cost":[],
                     ; CHECK-SAME: "device_type":"DEVICE_TYPE_INVALID",
                     ; CHECK-SAME: "grouped_gemm_backend_config":{
@@ -4038,11 +4038,11 @@ TEST_F(GroupedGemmRewriteTest,
 HloModule GroupedGemmRaggedContractingLarge600
 
 ENTRY AddRaggedDotsFunc {
-    p0 = bf16[64,2400]{1,0} parameter(0)
-    p1 = bf16[2400,8]{1,0} parameter(1)
+    p0 = f16[64,2400]{1,0} parameter(0)
+    p1 = f16[2400,8]{1,0} parameter(1)
     scalar = s64[] constant(4)
     p2 = s64[600] broadcast(scalar), dimensions={}
-    ROOT ragged-dot = bf16[600,64,8]{2,1,0} ragged-dot(p0, p1, p2),
+    ROOT ragged-dot = f16[600,64,8]{2,1,0} ragged-dot(p0, p1, p2),
                       lhs_contracting_dims={1}, rhs_contracting_dims={0},
                       lhs_ragged_dims={1}
 }
@@ -4056,10 +4056,10 @@ TEST_F(GroupedGemmRewriteTest,
 HloModule GroupedGemm
 
 ENTRY AddRaggedDotsFunc {
-    p0 = bf16[3,16,9]{2,1,0} parameter(0)
-    p1 = bf16[3,9,8]{2,1,0} parameter(1)
+    p0 = f16[3,64,9]{2,1,0} parameter(0)
+    p1 = f16[3,9,8]{2,1,0} parameter(1)
     p2 = s64[3,2] constant({{4, 5}, {4, 5}, {4, 5}})
-    ROOT ragged-dot = bf16[2,3,16,8]{3,2,1,0} ragged-dot(p0, p1, p2),
+    ROOT ragged-dot = f16[2,3,64,8]{3,2,1,0} ragged-dot(p0, p1, p2),
                       lhs_contracting_dims={2}, rhs_contracting_dims={1},
                       lhs_ragged_dims={2}, lhs_batch_dims={0}, rhs_batch_dims={0}
 }
@@ -4067,7 +4067,7 @@ ENTRY AddRaggedDotsFunc {
   MatchOptimizedHlo(hlo_text,
                     R"(
                     ; CHECK: custom_call_target="__cublas$lt$groupedMatmul",
-                    ; CHECK-SAME: backend_config={"operation_queue_id":"0","wait_on_operation_queues":[],
+                    ; CHECK-SAME: backend_config={"operation_queue_id":"0",
                     ; CHECK-SAME: "force_earliest_schedule":false,"reification_cost":[],
                     ; CHECK-SAME: "device_type":"DEVICE_TYPE_INVALID",
                     ; CHECK-SAME: "grouped_gemm_backend_config":{
@@ -4092,10 +4092,10 @@ TEST_F(GroupedGemmRewriteTest, CustomCallTargetGroupedGemmRaggedDimInBatchDim) {
 HloModule GroupedGemm
 
 ENTRY AddRaggedDotsFunc {
-    p0 = bf16[5,16,9]{2,1,0} parameter(0)
-    p1 = bf16[5,9,8]{2,1,0} parameter(1)
+    p0 = f16[5,16,9]{2,1,0} parameter(0)
+    p1 = f16[5,9,8]{2,1,0} parameter(1)
     p2 = s64[2] constant({3, 2})
-    ROOT ragged-dot = bf16[5,16,8]{2,1,0} ragged-dot(p0, p1, p2),
+    ROOT ragged-dot = f16[5,16,8]{2,1,0} ragged-dot(p0, p1, p2),
                       lhs_contracting_dims={2}, rhs_contracting_dims={1},
                       lhs_ragged_dims={0}, lhs_batch_dims={0}, rhs_batch_dims={0}
 }
@@ -4103,7 +4103,7 @@ ENTRY AddRaggedDotsFunc {
   MatchOptimizedHlo(hlo_text,
                     R"(
                     ; CHECK: custom_call_target="__cublas$lt$groupedMatmul",
-                    ; CHECK-SAME: backend_config={"operation_queue_id":"0","wait_on_operation_queues":[],
+                    ; CHECK-SAME: backend_config={"operation_queue_id":"0",
                     ; CHECK-SAME: "force_earliest_schedule":false,"reification_cost":[],
                     ; CHECK-SAME: "device_type":"DEVICE_TYPE_INVALID",
                     ; CHECK-SAME: "grouped_gemm_backend_config":{
@@ -4130,10 +4130,10 @@ TEST_F(GroupedGemmRewriteTest,
 HloModule GroupedGemm
 
 ENTRY AddRaggedDotsFunc {
-    p0 = bf16[16,6,9]{2,1,0} parameter(0)
-    p1 = bf16[16,9,8]{2,1,0} parameter(1)
+    p0 = f16[16,64,9]{2,1,0} parameter(0)
+    p1 = f16[16,9,8]{2,1,0} parameter(1)
     p2 = s64[4] constant({4, 2, 6, 4})
-    ROOT ragged-dot = bf16[16,6,8]{2,1,0} ragged-dot(p0, p1, p2),
+    ROOT ragged-dot = f16[16,64,8]{2,1,0} ragged-dot(p0, p1, p2),
                       lhs_contracting_dims={2}, rhs_contracting_dims={1},
                       lhs_ragged_dims={0}, lhs_batch_dims={0}, rhs_batch_dims={0}
 }
@@ -4141,7 +4141,7 @@ ENTRY AddRaggedDotsFunc {
   MatchOptimizedHlo(hlo_text,
                     R"(
                     ; CHECK: custom_call_target="__cublas$lt$groupedMatmul",
-                    ; CHECK-SAME: backend_config={"operation_queue_id":"0","wait_on_operation_queues":[],
+                    ; CHECK-SAME: backend_config={"operation_queue_id":"0",
                     ; CHECK-SAME: "force_earliest_schedule":false,"reification_cost":[],
                     ; CHECK-SAME: "device_type":"DEVICE_TYPE_INVALID",
                     ; CHECK-SAME: "grouped_gemm_backend_config":{
@@ -4175,10 +4175,10 @@ TEST_F(
 HloModule GroupedGemm
 
 ENTRY AddRaggedDotsFunc {
-    p0 = bf16[16,64,9]{2,1,0} parameter(0)
-    p1 = bf16[16,9,8]{2,1,0} parameter(1)
+    p0 = f16[16,64,9]{2,1,0} parameter(0)
+    p1 = f16[16,9,8]{2,1,0} parameter(1)
     p2 = s64[4] constant({4, 2, 6, 4})
-    ROOT ragged-dot = bf16[16,64,8]{1,2,0} ragged-dot(p0, p1, p2),
+    ROOT ragged-dot = f16[16,64,8]{1,2,0} ragged-dot(p0, p1, p2),
                       lhs_contracting_dims={2}, rhs_contracting_dims={1},
                       lhs_ragged_dims={0}, lhs_batch_dims={0}, rhs_batch_dims={0}
 }
@@ -4186,7 +4186,7 @@ ENTRY AddRaggedDotsFunc {
   MatchOptimizedHlo(hlo_text,
                     R"(
                     ; CHECK: custom_call_target="__cublas$lt$groupedMatmul",
-                    ; CHECK-SAME: backend_config={"operation_queue_id":"0","wait_on_operation_queues":[],
+                    ; CHECK-SAME: backend_config={"operation_queue_id":"0",
                     ; CHECK-SAME: "force_earliest_schedule":false,"reification_cost":[],
                     ; CHECK-SAME: "device_type":"DEVICE_TYPE_INVALID",
                     ; CHECK-SAME: "grouped_gemm_backend_config":{
@@ -4214,11 +4214,11 @@ TEST_F(GroupedGemmRewriteTest,
 HloModule GroupedGemmRaggedBatchLarge600
 
 ENTRY AddRaggedDotsFunc {
-    p0 = bf16[2400,64,9]{2,1,0} parameter(0)
-    p1 = bf16[2400,9,8]{2,1,0} parameter(1)
+    p0 = f16[2400,64,9]{2,1,0} parameter(0)
+    p1 = f16[2400,9,8]{2,1,0} parameter(1)
     scalar = s64[] constant(4)
     p2 = s64[600] broadcast(scalar), dimensions={}
-    ROOT ragged-dot = bf16[2400,64,8]{2,1,0} ragged-dot(p0, p1, p2),
+    ROOT ragged-dot = f16[2400,64,8]{2,1,0} ragged-dot(p0, p1, p2),
                       lhs_contracting_dims={2}, rhs_contracting_dims={1},
                       lhs_ragged_dims={0}, lhs_batch_dims={0}, rhs_batch_dims={0}
 }
@@ -4232,10 +4232,10 @@ TEST_F(GroupedGemmRewriteTest,
 HloModule GroupedGemm
 
 ENTRY AddRaggedDotsFunc {
-    p0 = bf16[128,64]{1,0} parameter(0)
-    p1 = bf16[8,64,32]{2,0,1} parameter(1)
+    p0 = f16[128,64]{1,0} parameter(0)
+    p1 = f16[8,64,32]{2,0,1} parameter(1)
     p2 = s32[8] constant({16, 16, 16, 16, 16, 16, 16, 16})
-    ROOT ragged-dot = bf16[128,32]{1,0} ragged-dot(p0, p1, p2),
+    ROOT ragged-dot = f16[128,32]{1,0} ragged-dot(p0, p1, p2),
                       lhs_contracting_dims={1}, rhs_contracting_dims={1},
                       lhs_ragged_dims={0}, rhs_group_dims={0}
 }
@@ -4243,7 +4243,7 @@ ENTRY AddRaggedDotsFunc {
   MatchOptimizedHlo(hlo_text,
                     R"(
                     ; CHECK: custom_call_target="__cublas$lt$groupedMatmul",
-                    ; CHECK-SAME: backend_config={"operation_queue_id":"0","wait_on_operation_queues":[],
+                    ; CHECK-SAME: backend_config={"operation_queue_id":"0",
                     ; CHECK-SAME: "force_earliest_schedule":false,"reification_cost":[],
                     ; CHECK-SAME: "device_type":"DEVICE_TYPE_INVALID",
                     ; CHECK-SAME: "grouped_gemm_backend_config":{
@@ -4269,10 +4269,10 @@ TEST_F(GroupedGemmRewriteTest,
 HloModule GroupedGemm
 
 ENTRY AddRaggedDotsFunc {
-    p0 = bf16[64,1024]{1,0} parameter(0)
-    p1 = bf16[1024,256]{1,0} parameter(1)
+    p0 = f16[64,1024]{1,0} parameter(0)
+    p1 = f16[1024,256]{1,0} parameter(1)
     p2 = s32[8] constant({128, 128, 128, 128, 128, 128, 128, 128})
-    ROOT ragged-dot = bf16[8,64,256]{2,0,1} ragged-dot(p0, p1, p2),
+    ROOT ragged-dot = f16[8,64,256]{2,0,1} ragged-dot(p0, p1, p2),
                       lhs_contracting_dims={1}, rhs_contracting_dims={0},
                       lhs_ragged_dims={1}
 }
@@ -4280,7 +4280,7 @@ ENTRY AddRaggedDotsFunc {
   MatchOptimizedHlo(hlo_text,
                     R"(
                     ; CHECK: custom_call_target="__cublas$lt$groupedMatmul",
-                    ; CHECK-SAME: backend_config={"operation_queue_id":"0","wait_on_operation_queues":[],
+                    ; CHECK-SAME: backend_config={"operation_queue_id":"0",
                     ; CHECK-SAME: "force_earliest_schedule":false,"reification_cost":[],
                     ; CHECK-SAME: "device_type":"DEVICE_TYPE_INVALID",
                     ; CHECK-SAME: "grouped_gemm_backend_config":{
@@ -4306,10 +4306,10 @@ TEST_F(GroupedGemmRewriteTest,
 HloModule GroupedGemm
 
 ENTRY AddRaggedDotsFunc {
-    p0 = bf16[1024,64]{1,0} parameter(0)
-    p1 = bf16[1024,256]{1,0} parameter(1)
+    p0 = f16[1024,64]{1,0} parameter(0)
+    p1 = f16[1024,256]{1,0} parameter(1)
     p2 = s32[8] constant({128, 128, 128, 128, 128, 128, 128, 128})
-    ROOT ragged-dot = bf16[8,64,256]{2,0,1} ragged-dot(p0, p1, p2),
+    ROOT ragged-dot = f16[8,64,256]{2,0,1} ragged-dot(p0, p1, p2),
                       lhs_contracting_dims={0}, rhs_contracting_dims={0},
                       lhs_ragged_dims={0}
 }
@@ -4317,7 +4317,7 @@ ENTRY AddRaggedDotsFunc {
   MatchOptimizedHlo(hlo_text,
                     R"(
                     ; CHECK: custom_call_target="__cublas$lt$groupedMatmul",
-                    ; CHECK-SAME: backend_config={"operation_queue_id":"0","wait_on_operation_queues":[],
+                    ; CHECK-SAME: backend_config={"operation_queue_id":"0",
                     ; CHECK-SAME: "force_earliest_schedule":false,"reification_cost":[],
                     ; CHECK-SAME: "device_type":"DEVICE_TYPE_INVALID",
                     ; CHECK-SAME: "grouped_gemm_backend_config":{
@@ -4339,14 +4339,21 @@ ENTRY AddRaggedDotsFunc {
 
 TEST_F(GroupedGemmRewriteTest,
        CustomCallTargetGroupedGemmRaggedNonContractingTranspose) {
+  if (IsRocm()) {
+    const auto* rocm_cc = Capability().rocm_compute_capability();
+    if (rocm_cc && rocm_cc->gfx_version() == "gfx950") {
+      GTEST_SKIP()
+          << "Ragged non-contracting transpose not supported on gfx950";
+    }
+  }
   const char* hlo_text = R"(
 HloModule GroupedGemm
 
 ENTRY AddRaggedDotsFunc {
-    p0 = bf16[9,64]{1,0} parameter(0)
-    p1 = bf16[4,9,8]{2,1,0} parameter(1)
+    p0 = f16[9,64]{1,0} parameter(0)
+    p1 = f16[4,9,8]{2,1,0} parameter(1)
     p2 = s64[4] constant({16, 8, 24, 16})
-    ROOT ragged-dot = bf16[64,8]{1,0} ragged-dot(p0, p1, p2),
+    ROOT ragged-dot = f16[64,8]{1,0} ragged-dot(p0, p1, p2),
                       lhs_contracting_dims={0}, rhs_contracting_dims={1},
                       lhs_ragged_dims={1}, rhs_group_dims={0}
 }
@@ -4354,7 +4361,7 @@ ENTRY AddRaggedDotsFunc {
   MatchOptimizedHlo(hlo_text,
                     R"(
                     ; CHECK: custom_call_target="__cublas$lt$groupedMatmul",
-                    ; CHECK-SAME: backend_config={"operation_queue_id":"0","wait_on_operation_queues":[],
+                    ; CHECK-SAME: backend_config={"operation_queue_id":"0",
                     ; CHECK-SAME: "force_earliest_schedule":false,"reification_cost":[],
                     ; CHECK-SAME: "device_type":"DEVICE_TYPE_INVALID",
                     ; CHECK-SAME: "grouped_gemm_backend_config":{

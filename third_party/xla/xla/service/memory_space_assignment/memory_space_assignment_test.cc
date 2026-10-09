@@ -1448,7 +1448,8 @@ ENTRY entry {
   options_result_modifier.max_retries = 1;
   options_result_modifier.allocation_request_modifier_testing_fn = nullptr;
   options_result_modifier.allocation_result_modifier_testing_fn =
-      [](const AllocationRequest& request, AllocationResult& result) {
+      [](const AllocationRequest& request, AllocationResult& result,
+         int64_t retry_number) {
         if (request.allocation_value_to_update->defining_instruction()
                     ->name() == "p0" &&
             request.use->hlo_use.instruction->name() == "add0") {
@@ -1544,7 +1545,8 @@ ENTRY entry {
   // sync slice conversion target, so that maybe other constraints of the
   // allocation can be satisfied.
   options.allocation_result_modifier_testing_fn =
-      [](const AllocationRequest& request, AllocationResult& result) {
+      [](const AllocationRequest& request, AllocationResult& result,
+         int64_t retry_number) {
         if (request.allocation_value->defining_instruction()->name() ==
                 "p0_copy" &&
             request.use->hlo_use.instruction->name() == "concat") {
@@ -14929,8 +14931,8 @@ ENTRY %main {
       "add.0.idx5", "add.1.idx5", "add.0.idx6", "add.1.idx6"};
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(), /*instruction_names=*/alternate_memory_uses,
-      /*operand_index=*/1, /*operand_opcode=*/HloOpcode::kCopyDone,
-      /*operand_memory_space=*/kAlternateMemorySpace);
+      /*operand_number=*/1, /*operand_memory_space=*/kAlternateMemorySpace,
+      /*operand_opcode=*/HloOpcode::kCopyDone);
 }
 
 TEST_F(MemorySpaceAssignmentTest,
@@ -15024,8 +15026,8 @@ ENTRY entry {
                                                   "add9",    "add12", "add15"};
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(), /*instruction_names=*/default_memory_uses,
-      /*operand_index=*/0, /*operand_opcode=*/HloOpcode::kParameter,
-      /*operand_memory_space=*/kDefaultMemorySpace);
+      /*operand_number=*/0, /*operand_memory_space=*/kDefaultMemorySpace,
+      /*operand_opcode=*/HloOpcode::kParameter);
 }
 
 TEST_F(MemorySpaceAssignmentTest, TestBlockPrefetchingLowConcurrentPrefetches) {
@@ -15081,8 +15083,8 @@ ENTRY entry {
       "negate0", "add3", "add6", "add9", "add12", "add13", "add14", "add15"};
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(), /*instruction_names=*/alternate_memory_uses,
-      /*operand_index=*/0, /*operand_opcode=*/HloOpcode::kCopyDone,
-      /*operand_memory_space=*/kAlternateMemorySpace);
+      /*operand_number=*/0, /*operand_memory_space=*/kAlternateMemorySpace,
+      /*operand_opcode=*/HloOpcode::kCopyDone);
 }
 
 TEST_F(MemorySpaceAssignmentTest, TestSingleBufferedBlockPrefetching) {
@@ -15134,8 +15136,8 @@ ENTRY entry {
       "negate0", "add3", "add6", "add9", "add12", "add15"};
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(), /*instruction_names=*/alternate_memory_uses,
-      /*operand_index=*/0, /*operand_opcode=*/HloOpcode::kCopyDone,
-      /*operand_memory_space=*/kAlternateMemorySpace);
+      /*operand_number=*/0, /*operand_memory_space=*/kAlternateMemorySpace,
+      /*operand_opcode=*/HloOpcode::kCopyDone);
 }
 
 TEST_F(MemorySpaceAssignmentTest, TestBlockPrefetchingWithAlisedUses) {
@@ -15178,30 +15180,30 @@ ENTRY entry {
       /*module=*/module.get(),
       /*instruction_names=*/{"p0", "p1", "p2", "p3", "p4", "p5"});
 
-  XLA_LOG_LINES(INFO, "Before MSA: \n" + module->ToString());
+  XLA_VLOG_LINES(1, "Before MSA: \n" + module->ToString());
   AssignMemorySpaceUsingCostAnalysis(module.get(),
                                      std::move(memory_space_options));
-  XLA_LOG_LINES(INFO, "After MSA: \n" + module->ToString());
+  XLA_VLOG_LINES(1, "After MSA: \n" + module->ToString());
 
   std::vector<std::string> prefetched_uses = {"custom_call0", "add15"};
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(), /*instruction_names=*/prefetched_uses,
-      /*operand_index=*/0, /*operand_opcode=*/HloOpcode::kCopyDone,
-      /*operand_memory_space=*/kAlternateMemorySpace);
+      /*operand_number=*/0, /*operand_memory_space=*/kAlternateMemorySpace,
+      /*operand_opcode=*/HloOpcode::kCopyDone);
 
   std::vector<std::string> aliased_uses = {"negate1", "custom_call13",
                                            "negate14"};
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(), /*instruction_names=*/aliased_uses,
-      /*operand_index=*/0, /*operand_opcode=*/HloOpcode::kCustomCall,
-      /*operand_memory_space=*/kAlternateMemorySpace);
+      /*operand_number=*/0, /*operand_memory_space=*/kAlternateMemorySpace,
+      /*operand_opcode=*/HloOpcode::kCustomCall);
 
   std::vector<std::string> default_memory_uses = {"add3", "add6", "add9",
                                                   "add12"};
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(), /*instruction_names=*/default_memory_uses,
-      /*operand_index=*/0, /*operand_opcode=*/HloOpcode::kParameter,
-      /*operand_memory_space=*/kDefaultMemorySpace);
+      /*operand_number=*/0, /*operand_memory_space=*/kDefaultMemorySpace,
+      /*operand_opcode=*/HloOpcode::kParameter);
 }
 
 TEST_F(MemorySpaceAssignmentTest,
@@ -15262,22 +15264,22 @@ ENTRY entry {
         return 0;
       };
 
-  XLA_LOG_LINES(INFO, "Before MSA: \n" + module->ToString());
+  XLA_VLOG_LINES(1, "Before MSA: \n" + module->ToString());
   AssignMemorySpaceUsingCostAnalysis(module.get(),
                                      std::move(memory_space_options));
-  XLA_LOG_LINES(INFO, "After MSA: \n" + module->ToString());
+  XLA_VLOG_LINES(1, "After MSA: \n" + module->ToString());
 
   std::vector<std::string> prefetched_uses = {"custom_call2"};
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(), /*instruction_names=*/prefetched_uses,
-      /*operand_index=*/0, /*operand_opcode=*/HloOpcode::kCopyDone,
-      /*operand_memory_space=*/kAlternateMemorySpace);
+      /*operand_number=*/0, /*operand_memory_space=*/kAlternateMemorySpace,
+      /*operand_opcode=*/HloOpcode::kCopyDone);
 
   std::vector<std::string> aliased_uses = {"custom_call8", "add13"};
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(), /*instruction_names=*/aliased_uses,
-      /*operand_index=*/0, /*operand_opcode=*/HloOpcode::kCustomCall,
-      /*operand_memory_space=*/kAlternateMemorySpace);
+      /*operand_number=*/0, /*operand_memory_space=*/kAlternateMemorySpace,
+      /*operand_opcode=*/HloOpcode::kCustomCall);
 }
 
 TEST_F(MemorySpaceAssignmentTest,
@@ -15323,23 +15325,23 @@ ENTRY entry {
       /*module=*/module.get(),
       /*instruction_names=*/{"p0", "p1", "p2", "p3", "p4", "p5"});
 
-  XLA_LOG_LINES(INFO, "Before MSA: \n" + module->ToString());
+  XLA_VLOG_LINES(1, "Before MSA: \n" + module->ToString());
   AssignMemorySpaceUsingCostAnalysis(module.get(),
                                      std::move(memory_space_options));
-  XLA_LOG_LINES(INFO, "After MSA: \n" + module->ToString());
+  XLA_VLOG_LINES(1, "After MSA: \n" + module->ToString());
 
   std::vector<std::string> alternate_memory_uses = {"negate0", "add3", "add6",
                                                     "add12", "add15"};
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(), /*instruction_names=*/alternate_memory_uses,
-      /*operand_index=*/0, /*operand_opcode=*/HloOpcode::kCopyDone,
-      /*operand_memory_space=*/kAlternateMemorySpace);
+      /*operand_number=*/0, /*operand_memory_space=*/kAlternateMemorySpace,
+      /*operand_opcode=*/HloOpcode::kCopyDone);
 
   std::vector<std::string> default_memory_uses = {"add9"};
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(), /*instruction_names=*/default_memory_uses,
-      /*operand_index=*/0, /*operand_opcode=*/HloOpcode::kParameter,
-      /*operand_memory_space=*/kDefaultMemorySpace);
+      /*operand_number=*/0, /*operand_memory_space=*/kDefaultMemorySpace,
+      /*operand_opcode=*/HloOpcode::kParameter);
 }
 
 TEST_F(MemorySpaceAssignmentTest, TestBlockPrefetchingDoubleBuffered) {
@@ -15391,8 +15393,8 @@ ENTRY entry {
                                               "add9",    "add12", "add15"};
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(), /*instruction_names=*/prefetched_uses,
-      /*operand_index=*/0, /*operand_opcode=*/HloOpcode::kCopyDone,
-      /*operand_memory_space=*/kAlternateMemorySpace);
+      /*operand_number=*/0, /*operand_memory_space=*/kAlternateMemorySpace,
+      /*operand_opcode=*/HloOpcode::kCopyDone);
 }
 
 TEST_F(MemorySpaceAssignmentTest, TestBlockPrefetchesWithMultipleUses) {
@@ -15449,8 +15451,8 @@ ENTRY entry {
       "negate0", "add3", "add6", "add9", "add12", "add13", "add14", "add15"};
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(), /*instruction_names=*/alternate_memory_uses,
-      /*operand_index=*/0, /*operand_opcode=*/HloOpcode::kCopyDone,
-      /*operand_memory_space=*/kAlternateMemorySpace);
+      /*operand_number=*/0, /*operand_memory_space=*/kAlternateMemorySpace,
+      /*operand_opcode=*/HloOpcode::kCopyDone);
 
   HloInstruction* negate0 = FindInstruction(module.get(), "negate0");
   HloInstruction* add3 = FindInstruction(module.get(), "add3");
@@ -15547,8 +15549,8 @@ ENTRY entry {
       "add9",       "add12",      "custom_call13", "add14", "add16"};
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(), /*instruction_names=*/alternate_memory_uses,
-      /*operand_index=*/0, /*operand_opcode=*/HloOpcode::kCopyDone,
-      /*operand_memory_space=*/kAlternateMemorySpace);
+      /*operand_number=*/0, /*operand_memory_space=*/kAlternateMemorySpace,
+      /*operand_opcode=*/HloOpcode::kCopyDone);
 
   // Check that the uses of the values aliased to the right of prefetched value
   // are from alternate memory space.
@@ -15557,8 +15559,8 @@ ENTRY entry {
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(),
       /*instruction_names=*/alt_memory_uses_from_aliased_pinned_values,
-      /*operand_index=*/0, /*operand_opcode=*/HloOpcode::kCustomCall,
-      /*operand_memory_space=*/kAlternateMemorySpace);
+      /*operand_number=*/0, /*operand_memory_space=*/kAlternateMemorySpace,
+      /*operand_opcode=*/HloOpcode::kCustomCall);
 
   HloInstruction* add0 = FindInstruction(module.get(), "add0");
   HloInstruction* add3 = FindInstruction(module.get(), "add3");
@@ -15577,8 +15579,8 @@ ENTRY entry {
                                                   "negate_cc4", "custom_call3"};
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(), /*instruction_names=*/default_memory_uses,
-      /*operand_index=*/0, /*operand_opcode=*/HloOpcode::kCustomCall,
-      /*operand_memory_space=*/kDefaultMemorySpace);
+      /*operand_number=*/0, /*operand_memory_space=*/kDefaultMemorySpace,
+      /*operand_opcode=*/HloOpcode::kCustomCall);
 }
 
 TEST_F(MemorySpaceAssignmentTest,
@@ -15634,16 +15636,16 @@ ENTRY entry {
                                               "add9",    "add12", "add15"};
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(), /*instruction_names=*/prefetched_uses,
-      /*operand_index=*/0,
-      /*operand_opcode=*/HloOpcode::kCopyDone,
-      /*operand_memory_space=*/kAlternateMemorySpace);
+      /*operand_number=*/0,
+      /*operand_memory_space=*/kAlternateMemorySpace,
+      /*operand_opcode=*/HloOpcode::kCopyDone);
 
   std::vector<std::string> colored_uses = {"add15"};
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(), /*instruction_names=*/colored_uses,
-      /*operand_index=*/1,
-      /*operand_opcode=*/HloOpcode::kCopyDone,
-      /*operand_memory_space=*/kAlternateMemorySpace);
+      /*operand_number=*/1,
+      /*operand_memory_space=*/kAlternateMemorySpace,
+      /*operand_opcode=*/HloOpcode::kCopyDone);
 }
 
 TEST_F(MemorySpaceAssignmentTest,
@@ -15682,7 +15684,7 @@ ENTRY entry {
   memory_space_options.reserved_bytes_for_block_prefetches = 48;
   memory_space_options.max_outstanding_block_prefetches = 10;
 
-  std::vector<HloPosition> block_prefetched_positions;
+  absl::flat_hash_set<HloPosition> block_prefetched_positions;
   TF_ASSERT_OK_AND_ASSIGN(auto alias_analysis,
                           HloAliasAnalysis::Run(module.get(), &alias_info_));
   const HloModule& hlo_module = alias_analysis->dataflow_analysis().module();
@@ -15705,7 +15707,7 @@ ENTRY entry {
                       << buffer->ToString();
               continue;
             }
-            block_prefetched_positions.push_back(value->defining_position());
+            block_prefetched_positions.insert(value->defining_position());
           }
         });
   }
@@ -15725,16 +15727,16 @@ ENTRY entry {
                                               "add9",    "add12", "add15"};
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(), /*instruction_names=*/prefetched_uses,
-      /*operand_index=*/0,
-      /*operand_opcode=*/HloOpcode::kCopyDone,
-      /*operand_memory_space=*/kAlternateMemorySpace);
+      /*operand_number=*/0,
+      /*operand_memory_space=*/kAlternateMemorySpace,
+      /*operand_opcode=*/HloOpcode::kCopyDone);
 
   std::vector<std::string> colored_uses = {"add15"};
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(), /*instruction_names=*/colored_uses,
-      /*operand_index=*/1,
-      /*operand_opcode=*/HloOpcode::kCopyDone,
-      /*operand_memory_space=*/kAlternateMemorySpace);
+      /*operand_number=*/1,
+      /*operand_memory_space=*/kAlternateMemorySpace,
+      /*operand_opcode=*/HloOpcode::kCopyDone);
 }
 
 TEST_F(SlicedPrefetchTest, TestBlockPrefetchingAsyncSlicePrefetches) {
@@ -15777,6 +15779,11 @@ ENTRY entry {
   memory_space_options.reserved_bytes_for_block_prefetches = 24;
   memory_space_options.max_outstanding_block_prefetches = 10;
   memory_space_options.max_outstanding_prefetches = 0;
+  memory_space_options.enable_sync_slice_replacement = true;
+  memory_space_options.is_async_slice_implemented_fn =
+      [](const HloInstruction* instruction) {
+        return instruction->opcode() == HloOpcode::kSlice;
+      };
   memory_space_options.block_prefetched_positions =
       GetHloPositions(module.get(), {"p0", "p1", "p2"});
 
@@ -15789,9 +15796,9 @@ ENTRY entry {
                                                    "add9",    "add12", "add15"};
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(), /*instruction_names=*/sliced_prefetch_uses,
-      /*operand_index=*/0,
-      /*operand_opcode=*/HloOpcode::kAsyncDone,
-      /*operand_memory_space=*/kAlternateMemorySpace);
+      /*operand_number=*/0,
+      /*operand_memory_space=*/kAlternateMemorySpace,
+      /*operand_opcode=*/HloOpcode::kAsyncDone);
 
   // Check there are no additional prefetches apart from block prefetches.
   const std::vector<HloInstruction*>& instructions =
@@ -15850,29 +15857,34 @@ ENTRY entry {
   memory_space_options.reserved_bytes_for_block_prefetches = 96;
   memory_space_options.max_outstanding_block_prefetches = 10;
   memory_space_options.max_outstanding_prefetches = 0;
+  memory_space_options.enable_sync_slice_replacement = true;
+  memory_space_options.is_async_slice_implemented_fn =
+      [](const HloInstruction* instruction) {
+        return instruction->opcode() == HloOpcode::kSlice;
+      };
 
   memory_space_options.block_prefetched_positions =
       GetHloPositions(module.get(), {"p0", "p1", "p2"});
 
-  XLA_LOG_LINES(INFO, "Before MSA: \n" + module->ToString());
+  XLA_VLOG_LINES(1, "Before MSA: \n" + module->ToString());
   AssignMemorySpaceUsingCostAnalysis(module.get(),
                                      std::move(memory_space_options));
-  XLA_LOG_LINES(INFO, "After MSA: \n" + module->ToString());
+  XLA_VLOG_LINES(1, "After MSA: \n" + module->ToString());
 
   std::vector<std::string> sliced_prefetch_uses = {
       "negate0", "add3", "add6", "add9", "add11", "add12", "add15"};
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(), /*instruction_names=*/sliced_prefetch_uses,
-      /*operand_index=*/0,
-      /*operand_opcode=*/HloOpcode::kAsyncDone,
-      /*operand_memory_space=*/kAlternateMemorySpace);
+      /*operand_number=*/0,
+      /*operand_memory_space=*/kAlternateMemorySpace,
+      /*operand_opcode=*/HloOpcode::kAsyncDone);
 
   std::vector<std::string> prefetched_uses = {"negate16", "add17"};
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(), /*instruction_names=*/prefetched_uses,
-      /*operand_index=*/0,
-      /*operand_opcode=*/HloOpcode::kCopyDone,
-      /*operand_memory_space=*/kAlternateMemorySpace);
+      /*operand_number=*/0,
+      /*operand_memory_space=*/kAlternateMemorySpace,
+      /*operand_opcode=*/HloOpcode::kCopyDone);
 
   HloInstruction* add3 = FindInstruction(module.get(), "add3");
   HloInstruction* add11 = FindInstruction(module.get(), "add11");
@@ -15892,6 +15904,116 @@ ENTRY entry {
                instruction->shape().layout().memory_space() ==
                    kAlternateMemorySpace &&
                (IsAsyncSliceDone(instruction) ||
+                instruction->opcode() == HloOpcode::kCopyDone);
+      });
+  EXPECT_EQ(num_prefetches, 7);
+}
+
+TEST_F(SlicedPrefetchTest,
+       TestBlockPrefetchingAsyncDynamicSliceWithMultipleUses) {
+  // Test block prefetching with async dynamic slices. This test covers the
+  // scenario where:
+  // - a dynamic slice (dynamic_slice1) has multiple uses.
+  // - the original parameter being sliced (p0) has multiple uses apart from the
+  //   dynamic slice. We expect that:
+  // - dynamic_slice1 is only prefetched once.
+  // - p0 is only prefetched once.
+  // - All uses of block prefetches are in the alternate memory space.
+  absl::string_view hlo_string = R"hlo(
+HloModule module, is_scheduled=true
+
+ENTRY entry {
+  p0 = f32[4,3]{1,0} parameter(0)
+  p1 = f32[4,3]{1,0} parameter(1)
+  p2 = f32[4,3]{1,0} parameter(2)
+  dim0 = s32[] parameter(3)
+  dim1 = s32[] parameter(4)
+  dim2 = s32[] parameter(5)
+  dim3 = s32[] parameter(6)
+  dynamic_slice0 = f32[2,3]{1,0} dynamic-slice(p0, dim0, dim1), dynamic_slice_sizes={2,3}
+  dynamic_slice1 = f32[2,3]{1,0} dynamic-slice(p1, dim2, dim3), dynamic_slice_sizes={2,3}
+  dynamic_slice2 = f32[2,3]{1,0} dynamic-slice(p2, dim0, dim1), dynamic_slice_sizes={2,3}
+  dynamic_slice3 = f32[2,3]{1,0} dynamic-slice(p0, dim2, dim3), dynamic_slice_sizes={2,3}
+  dynamic_slice4 = f32[2,3]{1,0} dynamic-slice(p1, dim0, dim1), dynamic_slice_sizes={2,3}
+  dynamic_slice5 = f32[2,3]{1,0} dynamic-slice(p2, dim2, dim3), dynamic_slice_sizes={2,3}
+  negate0 = f32[2,3]{1,0} negate(dynamic_slice0)
+  negate1 = f32[2,3]{1,0} negate(negate0)
+  negate2 = f32[2,3]{1,0} negate(negate1)
+  add3 = f32[2,3]{1,0} add(dynamic_slice1, negate2)
+  negate4 = f32[2,3]{1,0} negate(add3)
+  negate5 = f32[2,3]{1,0} negate(negate4)
+  add6 = f32[2,3]{1,0} add(dynamic_slice2, negate5)
+  negate7 = f32[2,3]{1,0} negate(add6)
+  negate8 = f32[2,3]{1,0} negate(negate7)
+  add9 = f32[2,3]{1,0} add(dynamic_slice3, negate8)
+  negate10 = f32[2,3]{1,0} negate(add9)
+  add11 = f32[2,3]{1,0} add(dynamic_slice1, negate10)
+  add12 = f32[2,3]{1,0} add(dynamic_slice4, add11)
+  negate13 = f32[2,3]{1,0} negate(add12)
+  negate14 = f32[2,3]{1,0} negate(negate13)
+  add15 = f32[2,3]{1,0} add(dynamic_slice5, negate14)
+  negate16 = f32[4,3]{1,0} negate(p0)
+  add17 = f32[4,3]{1,0} add(p0, negate16)
+  ROOT tuple = (f32[4,3]{1,0}, f32[2,3]{1,0}) tuple(add17, add15)
+})hlo";
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<VerifiedHloModule> module,
+                          ParseAndReturnVerifiedModule(hlo_string));
+  Options memory_space_options = DefaultMemorySpaceOptions();
+  memory_space_options.max_size_in_bytes = 96;
+  memory_space_options.reserved_bytes_for_block_prefetches = 96;
+  memory_space_options.max_outstanding_block_prefetches = 10;
+  memory_space_options.max_outstanding_prefetches = 0;
+  memory_space_options.enable_sync_slice_replacement = true;
+  memory_space_options.is_async_slice_implemented_fn =
+      [](const HloInstruction* instruction) {
+        return instruction->opcode() == HloOpcode::kDynamicSlice;
+      };
+
+  memory_space_options.block_prefetched_positions =
+      GetHloPositions(module.get(), {"p0", "p1", "p2"});
+
+  XLA_VLOG_LINES(1, "Before MSA: \n" + module->ToString());
+  AssignMemorySpaceUsingCostAnalysis(module.get(),
+                                     std::move(memory_space_options));
+  XLA_VLOG_LINES(1, "After MSA: \n" + module->ToString());
+
+  std::vector<std::string> sliced_prefetch_uses = {
+      "negate0", "add3", "add6", "add9", "add11", "add12", "add15"};
+  CheckOperandOpcodeAndMemorySpaceForInstructionNames(
+      /*module=*/module.get(), /*instruction_names=*/sliced_prefetch_uses,
+      /*operand_number=*/0,
+      /*operand_memory_space=*/kAlternateMemorySpace,
+      /*operand_opcode=*/HloOpcode::kAsyncDone);
+
+  std::vector<std::string> prefetched_uses = {"negate16", "add17"};
+  CheckOperandOpcodeAndMemorySpaceForInstructionNames(
+      /*module=*/module.get(), /*instruction_names=*/prefetched_uses,
+      /*operand_number=*/0,
+      /*operand_memory_space=*/kAlternateMemorySpace,
+      /*operand_opcode=*/HloOpcode::kCopyDone);
+
+  HloInstruction* add3 = FindInstruction(module.get(), "add3");
+  HloInstruction* add11 = FindInstruction(module.get(), "add11");
+  HloInstruction* negate16 = FindInstruction(module.get(), "negate16");
+  HloInstruction* add17 = FindInstruction(module.get(), "add17");
+  // Check dynamic_slice1 is only prefetched once.
+  EXPECT_EQ(add3->operand(0), add11->operand(0));
+  // Check p0 is only prefetched once.
+  EXPECT_EQ(negate16->operand(0), add17->operand(0));
+
+  // Check there are no additional prefetches apart from block prefetches.
+  const std::vector<HloInstruction*>& instructions =
+      module->schedule().sequence(module->entry_computation()).instructions();
+  int64_t num_prefetches =
+      absl::c_count_if(instructions, [&](const HloInstruction* instruction) {
+        return instruction->shape().has_layout() &&
+               instruction->shape().layout().memory_space() ==
+                   kAlternateMemorySpace &&
+               ((instruction->opcode() == HloOpcode::kAsyncDone &&
+                 (instruction->async_wrapped_instruction()->opcode() ==
+                      HloOpcode::kSlice ||
+                  instruction->async_wrapped_instruction()->opcode() ==
+                      HloOpcode::kDynamicSlice)) ||
                 instruction->opcode() == HloOpcode::kCopyDone);
       });
   EXPECT_EQ(num_prefetches, 7);
@@ -15939,6 +16061,11 @@ ENTRY entry {
   memory_space_options.reserved_bytes_for_block_prefetches = 48;
   memory_space_options.max_outstanding_block_prefetches = 10;
   memory_space_options.max_outstanding_prefetches = 0;
+  memory_space_options.enable_sync_slice_replacement = true;
+  memory_space_options.is_async_slice_implemented_fn =
+      [](const HloInstruction* instruction) {
+        return instruction->opcode() == HloOpcode::kSlice;
+      };
 
   memory_space_options.block_prefetched_positions =
       GetHloPositions(module.get(), {"p0", "p1", "p2"});
@@ -15952,9 +16079,9 @@ ENTRY entry {
                                                    "add9",    "add12", "add15"};
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(), /*instruction_names=*/sliced_prefetch_uses,
-      /*operand_index=*/0,
-      /*operand_opcode=*/HloOpcode::kAsyncDone,
-      /*operand_memory_space=*/kAlternateMemorySpace);
+      /*operand_number=*/0,
+      /*operand_memory_space=*/kAlternateMemorySpace,
+      /*operand_opcode=*/HloOpcode::kAsyncDone);
 
   // Check there are no additional prefetches apart from block prefetches.
   const std::vector<HloInstruction*>& instructions =
@@ -16040,8 +16167,8 @@ ENTRY entry {
   // space.
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(), /*instruction_names=*/prefetch_uses,
-      /*operand_index=*/0, /*operand_opcode=*/HloOpcode::kCustomCall,
-      /*operand_memory_space=*/kAlternateMemorySpace);
+      /*operand_number=*/0, /*operand_memory_space=*/kAlternateMemorySpace,
+      /*operand_opcode=*/HloOpcode::kCustomCall);
 }
 
 TEST_F(MemorySpaceAssignmentTest,
@@ -16153,16 +16280,16 @@ ENTRY entry {
                                               "add15",   "negate16", "add17"};
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(), /*instruction_names=*/prefetched_uses,
-      /*operand_index=*/0,
-      /*operand_opcode=*/HloOpcode::kCustomCall,
-      /*operand_memory_space=*/kAlternateMemorySpace);
+      /*operand_number=*/0,
+      /*operand_memory_space=*/kAlternateMemorySpace,
+      /*operand_opcode=*/HloOpcode::kCustomCall);
 
   // Check that all direct uses of parameters are in default memory space.
   std::vector<std::string> direct_uses = {"add18", "add19", "add20"};
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(), /*instruction_names=*/direct_uses,
-      /*operand_index=*/0, /*operand_opcode=*/HloOpcode::kParameter,
-      /*operand_memory_space=*/kDefaultMemorySpace);
+      /*operand_number=*/0, /*operand_memory_space=*/kDefaultMemorySpace,
+      /*operand_opcode=*/HloOpcode::kParameter);
 }
 
 TEST_F(MemorySpaceAssignmentTest,
@@ -16282,9 +16409,9 @@ ENTRY entry {
       "add12",   "custom_call15", "negate16", "custom_call17"};
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(), /*instruction_names=*/prefetched_uses,
-      /*operand_index=*/0,
-      /*operand_opcode=*/HloOpcode::kCustomCall,
-      /*operand_memory_space=*/kAlternateMemorySpace);
+      /*operand_number=*/0,
+      /*operand_memory_space=*/kAlternateMemorySpace,
+      /*operand_opcode=*/HloOpcode::kCustomCall);
 
   // Check that all aliased uses of custom call prefetches are in alternate
   // memory space.
@@ -16292,16 +16419,16 @@ ENTRY entry {
                                            "add22", "add23"};
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(), /*instruction_names=*/aliased_uses,
-      /*operand_index=*/1,
-      /*operand_opcode=*/HloOpcode::kCustomCall,
-      /*operand_memory_space=*/kAlternateMemorySpace);
+      /*operand_number=*/1,
+      /*operand_memory_space=*/kAlternateMemorySpace,
+      /*operand_opcode=*/HloOpcode::kCustomCall);
 
   // Check that all direct uses of parameters are in default memory space.
   std::vector<std::string> direct_uses = {"add18", "add19", "add20"};
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(), /*instruction_names=*/direct_uses,
-      /*operand_index=*/0, /*operand_opcode=*/HloOpcode::kParameter,
-      /*operand_memory_space=*/kDefaultMemorySpace);
+      /*operand_number=*/0, /*operand_memory_space=*/kDefaultMemorySpace,
+      /*operand_opcode=*/HloOpcode::kParameter);
 }
 
 TEST_F(MemorySpaceAssignmentTest, TestCustomCallPrefetchSourceAliasing) {
@@ -16403,8 +16530,8 @@ ENTRY entry {
   // space.
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(), /*instruction_names=*/prefetch_uses,
-      /*operand_index=*/0, /*operand_opcode=*/HloOpcode::kCustomCall,
-      /*operand_memory_space=*/kAlternateMemorySpace);
+      /*operand_number=*/0, /*operand_memory_space=*/kAlternateMemorySpace,
+      /*operand_opcode=*/HloOpcode::kCustomCall);
 
   std::vector<std::string> default_memory_space_uses = {
       "negate0",
@@ -16426,8 +16553,8 @@ ENTRY entry {
   // higher in the sort order.
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(), /*instruction_names=*/default_memory_space_uses,
-      /*operand_index=*/0, /*operand_opcode=*/HloOpcode::kCustomCall,
-      /*operand_memory_space=*/kDefaultMemorySpace);
+      /*operand_number=*/0, /*operand_memory_space=*/kDefaultMemorySpace,
+      /*operand_opcode=*/HloOpcode::kCustomCall);
 }
 
 TEST_F(SlicedPrefetchTest, TestMultiplePinnedAllocationsBug) {
@@ -16462,6 +16589,11 @@ ENTRY entry {
   memory_space_options.reserved_bytes_for_block_prefetches = 24;
   memory_space_options.max_outstanding_block_prefetches = 10;
   memory_space_options.max_outstanding_prefetches = 0;
+  memory_space_options.enable_sync_slice_replacement = true;
+  memory_space_options.is_async_slice_implemented_fn =
+      [](const HloInstruction* instruction) {
+        return instruction->opcode() == HloOpcode::kSlice;
+      };
   memory_space_options.block_prefetched_positions =
       GetHloPositions(module.get(), {"p0"});
   const std::string text_proto = R"pb(
@@ -16481,9 +16613,9 @@ ENTRY entry {
   std::vector<std::string> sliced_prefetch_uses = {"negate0", "add2"};
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(), /*instruction_names=*/sliced_prefetch_uses,
-      /*operand_index=*/0,
-      /*operand_opcode=*/HloOpcode::kAsyncDone,
-      /*operand_memory_space=*/kAlternateMemorySpace);
+      /*operand_number=*/0,
+      /*operand_memory_space=*/kAlternateMemorySpace,
+      /*operand_opcode=*/HloOpcode::kAsyncDone);
 }
 
 TEST_F(MemorySpaceAssignmentTest, TestBlockPrefetchingUsesInsideConditional) {
@@ -16533,15 +16665,15 @@ ENTRY entry {
 
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(), /*instruction_names=*/{"negate0"},
-      /*operand_index=*/0,
-      /*operand_opcode=*/HloOpcode::kCopyDone,
-      /*operand_memory_space=*/kAlternateMemorySpace);
+      /*operand_number=*/0,
+      /*operand_memory_space=*/kAlternateMemorySpace,
+      /*operand_opcode=*/HloOpcode::kCopyDone);
 
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(), /*instruction_names=*/{"negate3", "negate5"},
-      /*operand_index=*/0,
-      /*operand_opcode=*/HloOpcode::kGetTupleElement,
-      /*operand_memory_space=*/kAlternateMemorySpace);
+      /*operand_number=*/0,
+      /*operand_memory_space=*/kAlternateMemorySpace,
+      /*operand_opcode=*/HloOpcode::kGetTupleElement);
 }
 
 TEST_F(MemorySpaceAssignmentTest,
@@ -16602,15 +16734,15 @@ ENTRY entry {
 
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(), /*instruction_names=*/{"negate0"},
-      /*operand_index=*/0,
-      /*operand_opcode=*/HloOpcode::kCustomCall,
-      /*operand_memory_space=*/kAlternateMemorySpace);
+      /*operand_number=*/0,
+      /*operand_memory_space=*/kAlternateMemorySpace,
+      /*operand_opcode=*/HloOpcode::kCustomCall);
 
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       /*module=*/module.get(), /*instruction_names=*/{"negate3", "negate5"},
-      /*operand_index=*/0,
-      /*operand_opcode=*/HloOpcode::kGetTupleElement,
-      /*operand_memory_space=*/kAlternateMemorySpace);
+      /*operand_number=*/0,
+      /*operand_memory_space=*/kAlternateMemorySpace,
+      /*operand_opcode=*/HloOpcode::kGetTupleElement);
 }
 
 TEST_F(MemorySpaceAssignmentTest, NoPrefetchWithBandwidthLimitingAsyncStart) {
@@ -16686,8 +16818,8 @@ TEST_F(MemorySpaceAssignmentTest,
   AssignMemorySpace(module.get(), std::move(options));
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       module.get(), {"dot.0"},
-      /*operand_index=*/0, /*operand_opcode=*/HloOpcode::kAdd,
-      /*operand_memory_space=*/kAlternateMemorySpace);
+      /*operand_number=*/0, /*operand_memory_space=*/kAlternateMemorySpace,
+      /*operand_opcode=*/HloOpcode::kAdd);
   auto cross_program_prefetches = module->CrossProgramPrefetches();
   ASSERT_EQ(cross_program_prefetches.size(), 0);
 }
@@ -16826,8 +16958,8 @@ ENTRY entry {
   std::vector<std::string> input_colored = {"add0"};
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       module.get(), input_colored,
-      /*operand_index=*/0, /*operand_opcode=*/HloOpcode::kCopyDone,
-      /*operand_memory_space=*/kAlternateMemorySpace);
+      /*operand_number=*/0, /*operand_memory_space=*/kAlternateMemorySpace,
+      /*operand_opcode=*/HloOpcode::kCopyDone);
 }
 
 TEST_F(MemorySpaceAssignmentTest, ScheduleDonesBeforeStarts) {
@@ -16920,20 +17052,110 @@ ENTRY entry {
                                       kDefaultMemorySpace);
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       module.get(), {"add0", "sub0"},
-      /*operand_index=*/0, /*operand_opcode=*/HloOpcode::kNegate,
-      /*operand_memory_space=*/kAlternateMemorySpace);
+      /*operand_number=*/0, /*operand_memory_space=*/kAlternateMemorySpace,
+      /*operand_opcode=*/HloOpcode::kNegate);
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       module.get(), {"add0", "sub0"},
-      /*operand_index=*/1, /*operand_opcode=*/HloOpcode::kNegate,
-      /*operand_memory_space=*/kDefaultMemorySpace);
+      /*operand_number=*/1, /*operand_memory_space=*/kDefaultMemorySpace,
+      /*operand_opcode=*/HloOpcode::kNegate);
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       module.get(), {"mul0", "div0"},
-      /*operand_index=*/0, /*operand_opcode=*/HloOpcode::kCopyDone,
-      /*operand_memory_space=*/kDefaultMemorySpace);
+      /*operand_number=*/0, /*operand_memory_space=*/kDefaultMemorySpace,
+      /*operand_opcode=*/HloOpcode::kCopyDone);
   CheckOperandOpcodeAndMemorySpaceForInstructionNames(
       module.get(), {"mul0", "div0"},
-      /*operand_index=*/1, /*operand_opcode=*/HloOpcode::kCopyDone,
-      /*operand_memory_space=*/kAlternateMemorySpace);
+      /*operand_number=*/1, /*operand_memory_space=*/kAlternateMemorySpace,
+      /*operand_opcode=*/HloOpcode::kCopyDone);
+}
+
+TEST_F(MemorySpaceAssignmentTest, TestReresrvingPendingAllocations) {
+  // * negate0, negate3, and negate4 require contiguous allocations.
+  // * negate0 and negate4 are colored in alternate memory space.
+  // * Sort order is negate3, negate4, negate0 followed by other buffers.
+  // * When we force fail the allocation of negate0, the reserved allocation
+  //   should be re-reserved during repacking.
+  absl::string_view hlo_string = R"hlo(
+HloModule module, is_scheduled=true
+
+ENTRY entry {
+  param0 = f32[2,3]{1,0} parameter(1), sharding={replicated}
+  param1 = f32[4,3]{1,0} parameter(0), sharding={replicated}
+  param2 = f32[2,3]{1,0} parameter(2), sharding={replicated}
+  negate0 = f32[4,3]{1,0} negate(param1)
+  negate1 = f32[4,3]{1,0} negate(negate0)
+  negate2 = f32[4,3]{1,0} negate(negate1)
+  negate3 = f32[2,3]{1,0} negate(param0)
+  add0 = f32[4,3]{1,0} add(negate0, negate2)
+  negate4 = f32[2,3]{1,0} negate(param2)
+  tanh0 = f32[4,3]{1,0} tanh(add0)
+  negate5 = f32[2,3]{1,0} negate(negate4)
+  add1 = f32[2,3]{1,0} add(negate3,negate5)
+  ROOT tuple0 = (f32[2,3]{1,0}, f32[4,3]{1,0}) tuple(add1, tanh0)
+})hlo";
+
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<VerifiedHloModule> module,
+                          ParseAndReturnVerifiedModule(hlo_string));
+  Options memory_space_options = DefaultMemorySpaceOptions();
+  memory_space_options.max_size_in_bytes = 72;
+  memory_space_options.verify = true;
+  memory_space_options.position_requires_contiguous_allocation_fn =
+      [](const HloPosition& position) {
+        return position.instruction->name() == "negate0" ||
+               position.instruction->name() == "negate3" ||
+               position.instruction->name() == "negate4";
+      };
+  HloPosition negate0_position{FindInstruction(module.get(), "negate0"), {}};
+  HloPosition negate4_position{FindInstruction(module.get(), "negate4"), {}};
+  memory_space_options.max_retries = 1;
+  memory_space_options.max_repacks = 1;
+  memory_space_options.buffer_colorings = {
+      {negate0_position, kAlternateMemorySpace},
+      {negate4_position, kAlternateMemorySpace}};
+  absl::flat_hash_map<std::pair<int64_t, int64_t>, int64_t> repack_map;
+  auto check_fun = [](absl::Span<AllocationBlock*> allocations) {
+    // 3 allocations: 2 committed allocations for negate3 and negate4
+    // 1 re-reserved allocation for negate0
+    EXPECT_EQ(allocations.size(), 3);
+  };
+  FakeMemorySpaceAssignmentRepacker repacker =
+      FakeMemorySpaceAssignmentRepacker(repack_map, check_fun, true);
+
+  memory_space_options.repacker = &repacker;
+  MsaBufferIntervalCompare buffer_interval_compare =
+      [](const MsaBufferInterval& lhs, const MsaBufferInterval& rhs) {
+        auto lookup = [](const MsaBufferInterval& x) {
+          int priority = 100;
+          if (x.buffer->instruction()->name() == "negate3") {
+            priority = 1;
+          }
+          if (x.buffer->instruction()->name() == "negate4") {
+            priority = 2;
+          }
+          if (x.buffer->instruction()->name() == "negate0") {
+            priority = 3;
+          }
+          return std::make_tuple(priority, x.buffer->instruction()->name());
+        };
+        return lookup(lhs) < lookup(rhs);
+      };
+
+  memory_space_options.allocation_result_modifier_testing_fn =
+      [](const AllocationRequest& request, AllocationResult& result,
+         int64_t retry_number) {
+        if (request.allocation_value->defining_instruction()->name() ==
+                "negate0" &&
+            retry_number <= 0 && result == AllocationResult::kSuccess) {
+          result = AllocationResult::kFailOutOfMemory;
+        }
+      };
+
+  InstructionCountPrefetchIntervalPicker prefetch_interval_picker(0, 100);
+  XLA_VLOG_LINES(1, "Before MSA: \n" + module->ToString());
+  AssignMemorySpace(module.get(), std::move(memory_space_options),
+                    buffer_interval_compare, &prefetch_interval_picker);
+  XLA_VLOG_LINES(1, "After MSA: \n" + module->ToString());
+  CheckMemorySpaceForInstructionNames(
+      module.get(), {"negate0", "negate4", "negate3"}, kAlternateMemorySpace);
 }
 
 }  // namespace

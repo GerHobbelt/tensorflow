@@ -211,7 +211,8 @@ struct Options {
   // Should only be used for testing purposes. This function allows us to
   // modify the AllocationResult after the AllocationRequest has been processed
   // by AllocateSegment().
-  std::function<void(const AllocationRequest&, AllocationResult&)>
+  std::function<void(const AllocationRequest&, AllocationResult&,
+                     int64_t retry_number)>
       allocation_result_modifier_testing_fn = nullptr;
 
   // Should only be used for testing purposes. This function allows us to
@@ -424,7 +425,7 @@ struct Options {
   uint64_t reserved_bytes_for_block_prefetches = 0;
 
   // List of hlo positions for block prefetches.
-  std::vector<HloPosition> block_prefetched_positions;
+  absl::flat_hash_set<HloPosition> block_prefetched_positions;
 
   // Determines the bandwidth adjustment factor for an async start instruction.
   // The available bandwidth for instructions between this and the async done

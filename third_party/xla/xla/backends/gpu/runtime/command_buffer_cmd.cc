@@ -369,52 +369,6 @@ absl::StatusOr<const se::CommandBuffer::Command*> EmptyCmd::Record(
 }
 
 //===----------------------------------------------------------------------===//
-// ComputationId
-//===----------------------------------------------------------------------===//
-
-ComputationIdCmd::ComputationIdCmd(BufferAllocation::Slice dest, Kind kind)
-    : Command(CommandType::kComputationIdCmd), dest_(dest), kind_(kind) {}
-
-Command::BufferUses ComputationIdCmd::buffer_uses() const {
-  return {BufferUse::Write(dest_, ShapeUtil::MakeShape(S32, {}))};
-}
-
-absl::StatusOr<const se::CommandBuffer::Command*> ComputationIdCmd::Record(
-    const Thunk::ExecuteParams& execute_params,
-    const RecordParams& record_params, RecordAction record_action,
-    se::CommandBuffer* command_buffer) {
-  se::DeviceAddressBase dst =
-      execute_params.buffer_allocations->GetDeviceAddress(dest_);
-
-  GlobalDeviceId global_device_id =
-      execute_params.collective_params->global_device_id;
-  TF_ASSIGN_OR_RETURN(
-      const DeviceAssignment::LogicalID logical_id,
-      execute_params.collective_params->device_assn->LogicalIdForDevice(
-          global_device_id));
-
-  uint32_t value = static_cast<uint32_t>(kind_ == Kind::kReplica
-                                             ? logical_id.replica_id
-                                             : logical_id.computation_id);
-
-  VLOG(5) << "ComputationIdCmd"
-          << ": kind=" << (kind_ == Kind::kReplica ? "replica" : "partition")
-          << "; value=" << value;
-  VLOG(5) << "  Id: " << dest_ << " (" << dst.opaque() << ")";
-
-  return Handle(
-      std::move(record_action),
-      [&](absl::Span<const se::CommandBuffer::Command* const> dependencies) {
-        return command_buffer->CreateMemset(&dst, value, /*num_elements=*/1,
-                                            dependencies);
-      },
-      [&](const se::CommandBuffer::Command* command) {
-        return command_buffer->UpdateMemset(command, &dst, value,
-                                            /*num_elements=*/1);
-      });
-}
-
-//===----------------------------------------------------------------------===//
 // LaunchCmd
 //===----------------------------------------------------------------------===//
 
@@ -694,48 +648,6 @@ absl::StatusOr<const se::CommandBuffer::Command*> MemzeroCmd::Record(
 
 Command::BufferUses MemzeroCmd::buffer_uses() const {
   return {BufferUse::Write(dst_.slice, dst_.shape)};
-}
-
-//===----------------------------------------------------------------------===//
-// Memset32Cmd
-//===----------------------------------------------------------------------===//
-
-Memset32Cmd::Memset32Cmd(BufferAllocation::Slice dst, uint32_t bit_pattern)
-    : Command(CommandType::kMemset32Cmd),
-      dst_(dst),
-      bit_pattern_(bit_pattern) {}
-
-absl::StatusOr<const se::CommandBuffer::Command*> Memset32Cmd::Record(
-    const Thunk::ExecuteParams& execute_params,
-    const RecordParams& record_params, RecordAction record_action,
-    se::CommandBuffer* command_buffer) {
-  se::DeviceAddressBase dst =
-      execute_params.buffer_allocations->GetDeviceAddress(dst_);
-
-  VLOG(5) << "Memset32Cmd: bit_pattern=" << bit_pattern_;
-  VLOG(5) << "  Dst: " << dst_ << " (" << dst.opaque() << ")";
-
-  if (dst_.size() == 0) {
-    VLOG(5) << "Skip recording Memset32Cmd command of 0 bytes";
-    return nullptr;
-  }
-
-  return Handle(
-      std::move(record_action),
-      [&](absl::Span<const se::CommandBuffer::Command* const> dependencies) {
-        return command_buffer->CreateMemset(
-            &dst, bit_pattern_,
-            /*num_elements=*/dst_.size() / sizeof(uint32_t), dependencies);
-      },
-      [&](const se::CommandBuffer::Command* command) {
-        return command_buffer->UpdateMemset(
-            command, &dst, bit_pattern_,
-            /*num_elements=*/dst_.size() / sizeof(uint32_t));
-      });
-}
-
-Command::BufferUses Memset32Cmd::buffer_uses() const {
-  return {BufferUse::Write(dst_, ShapeUtil::MakeShape(U32, {}))};
 }
 
 //===----------------------------------------------------------------------===//
@@ -1446,8 +1358,12 @@ absl::Status CollectiveCmd::Prepare(const Thunk::PrepareParams& params) {
                           *params.collective_params->device_assn,
                           config().replica_groups, config().group_mode));
 
-  return params.collective_clique_requests->RequestClique(
-      clique_key, std::move(device_groups));
+  // Sort device groups: RequestClique expects pre-sorted groups.
+  absl::c_for_each(device_groups, [](auto& group) { absl::c_sort(group); });
+  absl::c_sort(device_groups);
+
+  return params.collective_clique_requests->RequestClique(clique_key,
+                                                          device_groups);
 }
 
 absl::StatusOr<const se::CommandBuffer::Command*>
@@ -2041,14 +1957,21 @@ absl::StatusOr<const se::CommandBuffer::Command*> CollectivePermuteCmd::Record(
   const P2PConfig::SourceTargetMapEntry source_target =
       P2PConfig::GetSourceTarget(p2p_config_.id_to_source_target, current_id);
 
+  // Convert logical source/target IDs to communicator-local ranks.
+  P2PConfig::SourceTargetRanks source_target_ranks;
+  if (source_target.source) {
+    source_target_ranks.source = RankId(*source_target.source);
+  }
+  if (source_target.target) {
+    source_target_ranks.target = RankId(*source_target.target);
+  }
+
   // MemCpy case is not currently supported in CommandBuffer.
   return RecordTracedCommand(
       execute_params, record_params, std::move(record_action), command_buffer,
       [&](se::Stream* stream) {
-        return RunCollectivePermute(source_target, device_buffers, *stream,
-                                    *comm, device_string, current_id,
-                                    /*use_memcpy=*/false,
-                                    /*recv_ptr_map=*/nullptr,
+        return RunCollectivePermute(source_target_ranks, device_buffers,
+                                    *stream, *comm, device_string, current_id,
                                     use_symmetric_buffer);
       });
 }
@@ -2542,14 +2465,19 @@ absl::StatusOr<const se::CommandBuffer::Command*> RaggedAllToAllCmd::Record(
             }
 
             // Zero buffers synchronously (Safe during graph construction)
-            state_status = executor->SynchronousMemZero(
+            state_status = execute_params.stream->MemZero(
                 state->barrier_signal_buffer.address_ptr(), signal_buf_bytes);
             if (!state_status.ok()) {
               return nullptr;
             }
 
-            state_status = executor->SynchronousMemZero(
+            state_status = execute_params.stream->MemZero(
                 state->barrier_signal_value.address_ptr(), sizeof(uint32_t));
+            if (!state_status.ok()) {
+              return nullptr;
+            }
+
+            state_status = execute_params.stream->BlockHostUntilDone();
             if (!state_status.ok()) {
               return nullptr;
             }

@@ -111,6 +111,9 @@ class TracedCommandBuffer : public CommandState {
 
 // A base class for commands implemented as tracing of stream activities.
 class TracedCommandBufferCmd : public Command {
+ public:
+  bool IsTracedCommand() const override { return true; }
+
  protected:
   explicit TracedCommandBufferCmd(CommandType cmd_type);
 
@@ -136,28 +139,6 @@ class EmptyCmd : public Command {
       const Thunk::ExecuteParams& execute_params,
       const RecordParams& record_params, RecordAction record_action,
       se::CommandBuffer* command_buffer) override;
-};
-
-//===----------------------------------------------------------------------===//
-// ComputationIdCmd (ReplicaId and PartitionId)
-//===----------------------------------------------------------------------===//
-
-class ComputationIdCmd : public Command {
- public:
-  enum class Kind { kReplica, kPartition };
-
-  ComputationIdCmd(BufferAllocation::Slice dest, Kind kind);
-
-  absl::StatusOr<const se::CommandBuffer::Command*> Record(
-      const Thunk::ExecuteParams& execute_params,
-      const RecordParams& record_params, RecordAction record_action,
-      se::CommandBuffer* command_buffer) override;
-
-  BufferUses buffer_uses() const override;
-
- private:
-  BufferAllocation::Slice dest_;
-  Kind kind_;
 };
 
 //===----------------------------------------------------------------------===//
@@ -269,26 +250,6 @@ class MemzeroCmd : public Command {
 
  private:
   ShapedSlice dst_;
-};
-
-//===----------------------------------------------------------------------===//
-// Memset32Cmd
-//===----------------------------------------------------------------------===//
-
-class Memset32Cmd : public Command {
- public:
-  Memset32Cmd(BufferAllocation::Slice dst, uint32_t bit_pattern);
-
-  absl::StatusOr<const se::CommandBuffer::Command*> Record(
-      const Thunk::ExecuteParams& execute_params,
-      const RecordParams& record_params, RecordAction record_action,
-      se::CommandBuffer* command_buffer) override;
-
-  BufferUses buffer_uses() const override;
-
- private:
-  BufferAllocation::Slice dst_;
-  uint32_t bit_pattern_;
 };
 
 //===----------------------------------------------------------------------===//
@@ -554,6 +515,8 @@ class CollectiveCmd : public Command {
   CollectiveCmd(CommandType cmd_type, CollectiveConfig config);
 
   absl::Status Prepare(const Thunk::PrepareParams& params) final;
+
+  bool IsTracedCommand() const override { return true; }
 
   bool requires_initialization() const final { return true; }
 

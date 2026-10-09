@@ -1095,11 +1095,12 @@ class MsaAlgorithm : public GlobalDecreasingSizeBestFitHeap<HloValue> {
   // this allocation sequence.
   void AddToPendingChunks(const MsaBufferInterval& buffer_interval,
                           const Chunk& chunk);
+
   // If we need to remove the allocations for this allocation sequence, this
   // removes pending chunks and asynchronous copies in the respective pending
   // buffers from the interval trees. If an allocation request returns
   // kFailRequiresUncommit, this method must be called.
-  void UncommitPendingChunks(absl::Span<AllocationValue> allocation_values);
+  void UncommitPendingWork(absl::Span<AllocationValue> allocation_values);
 
   // Finalizes the allocations where they can no longer be uncommitted.
   void FinalizeAllocations(absl::Span<AllocationValue> allocation_values);
@@ -1266,6 +1267,16 @@ class MsaAlgorithm : public GlobalDecreasingSizeBestFitHeap<HloValue> {
   void FreeAlternateMemoryForScopedMemoryAllocations(
       int64_t max_scoped_memory_size);
 
+  // Marks the given HloValue as finalized, i.e., its allocation values have
+  // been finalized and cannot be uncommitted or changed.
+  void FinalizeValue(const HloValue* value) { finalized_values_.insert(value); }
+
+  // Returns true if the given HloValue is finalized, i.e., its allocation
+  // values have been finalized and cannot be uncommitted or changed.
+  bool IsValueFinalized(const HloValue* value) const {
+    return finalized_values_.contains(value);
+  }
+
   HloModule* module_ = nullptr;
   AllocationSequence* allocations_;
   // Edge time indices store start and end times allocations in alternate
@@ -1376,6 +1387,11 @@ class MsaAlgorithm : public GlobalDecreasingSizeBestFitHeap<HloValue> {
   // Vector to preserve insertion order for deterministic window prefetching
   // results.
   std::vector<HloUse> uses_in_default_memory_;
+
+  // We have released the chunks corresponding to the allocations in the list.
+  // When we uncommit the current pending state following a
+  // kFailRequiresUncommit, we need to re-reserve those chunks.
+  std::vector<ReservedAllocation*> pending_deallocated_reserved_allocations_;
 };
 
 }  // namespace memory_space_assignment
