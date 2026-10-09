@@ -274,23 +274,24 @@ TEST_F(MemorySpaceAssignmentTest, BasicSplit) {
   Options options = DefaultMemorySpaceOptions();
   options.max_size_in_bytes = 256 * 512 * 16;
   options.init_split_tree_fn =
-      [&options](const HloInstruction* instruction,
-                 absl::flat_hash_map<const HloInstruction*, ShapeTree<int64_t>>*
-                     split_map) {
-        if (split_map != nullptr) {
-          auto result = split_map->find(instruction);
-          if (result != split_map->end()) {
-            return result->second;
-          }
-        }
-        return ShapeTree<int64_t>(instruction->shape(),
-                                  options.any_split_dimension);
-      };
+      [](const HloInstruction* instruction,
+         absl::flat_hash_map<const HloInstruction*,
+                             absl::flat_hash_map<ShapeIndex, int64_t>>*
+             split_map) -> absl::flat_hash_map<ShapeIndex, int64_t> {
+    if (split_map != nullptr) {
+      auto result = split_map->find(instruction);
+      if (result != split_map->end()) {
+        return result->second;
+      }
+    }
+    return {};
+  };
 
   options.determine_split_dimension_fn =
       [&split_config](
           const HloValue& hlo_value,
-          absl::flat_hash_map<const HloInstruction*, ShapeTree<int64_t>>*
+          absl::flat_hash_map<const HloInstruction*,
+                              absl::flat_hash_map<ShapeIndex, int64_t>>*
               split_map) -> std::optional<SplitConfig> {
     if (hlo_value.instruction()->opcode() == HloOpcode::kAdd ||
         hlo_value.instruction()->opcode() == HloOpcode::kSubtract) {
@@ -7876,6 +7877,45 @@ TEST_F(MemorySpaceAssignmentTest,
       LOG(INFO) << "Marking the use inefficient.";
       marked_inefficient = true;
       return {HloUse{FindInstruction(module.get(), "negate0_entry"), 0}};
+    }
+    return {};
+  };
+  AssignMemorySpace(module.get(), std::move(options));
+}
+
+// The injected hook flags the same site on every retry. Once that site's
+// default memory requirement is committed, re-adding it is a no op, so the
+// retry cannot change anything. Finish must finalize rather than loop: before
+// the fix this test hangs.
+TEST_F(MemorySpaceAssignmentTest, InefficientAllocationRetryWithoutProgress) {
+  absl::string_view hlo_string = R"hlo(
+  HloModule module, is_scheduled=true
+
+  ENTRY entry {
+    p0 = f32[3]{0} parameter(0)
+    p1 = f32[3]{0} parameter(1)
+    negate0 = f32[3]{0} negate(p1)
+    negate1 = f32[3]{0} negate(negate0)
+    negate2 = f32[3]{0} negate(negate1)
+    negate3 = f32[3]{0} negate(negate2)
+    negate4 = f32[3]{0} negate(negate3)
+    negate5 = f32[3]{0} negate(negate4)
+    negate6 = f32[3]{0} negate(negate5)
+    ROOT add = f32[3]{0} add(negate6, p0)
+  }
+  )hlo";
+
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          ParseAndReturnVerifiedModule(hlo_string));
+  Options options = DefaultMemorySpaceOptions();
+  // The hook flags the add instruction's use of p0 as inefficient.
+  options.get_inefficient_allocation_sites_fn =
+      [&](absl::Span<HloPosition> defining_positions)
+      -> std::vector<std::variant<HloPosition, HloUse>> {
+    if (absl::c_find(defining_positions,
+                     HloPosition{FindInstruction(module.get(), "p0"), {}}) !=
+        defining_positions.end()) {
+      return {HloUse{FindInstruction(module.get(), "add"), 1}};
     }
     return {};
   };

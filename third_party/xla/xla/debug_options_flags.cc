@@ -263,6 +263,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_cpu_use_acl(true);
 #endif
   opts.set_xla_cpu_use_xnnpack(true);
+  opts.set_xla_cpu_use_new_xtile_lowering(false);
   opts.set_xla_cpu_experimental_xnn_graph_fusion_mode(
       DebugOptions::XNN_GRAPH_FUSION_MODE_DISABLED);
   opts.add_xla_cpu_experimental_ynn_fusion_type(
@@ -298,6 +299,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_cpu_enable_fast_min_max(true);
 
   opts.set_xla_gpu_enable_cublaslt(true);
+  opts.set_xla_gpu_trace_annotation_level(0);
 
   opts.add_xla_gpu_enable_command_buffer(DebugOptions::CONDITIONAL);
   opts.add_xla_gpu_enable_command_buffer(DebugOptions::CUBLAS);
@@ -347,7 +349,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_enable_enzyme_comms_opt(false);
   opts.set_xla_recognize_reduction_optimization_level(0);
 
-  opts.set_xla_gpu_enable_dynamic_slice_fusion(false);
+  opts.set_xla_gpu_enable_dynamic_slice_fusion(true);
   opts.set_xla_gpu_enable_dus_accumulator_zero_init_elimination(false);
   opts.set_xla_gpu_experimental_dynamic_slice_fusion_verify_offsets(false);
   opts.set_xla_gpu_nccl_termination_timeout_seconds(-1);
@@ -520,6 +522,8 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_gpu_enable_scatter_determinism_expander(false);
   opts.set_xla_gpu_unsupported_enable_all_reduce_decomposer(false);
   opts.set_xla_gpu_unsupported_enable_ragged_all_to_all_decomposer(false);
+  opts.set_xla_gpu_unsupported_enable_ragged_all_to_all_multi_host_decomposer(
+      true);
   opts.add_xla_gpu_experimental_use_collective_kernels(
       DebugOptions::COLLECTIVE_KERNEL_ALL_REDUCE);
   opts.set_xla_gpu_unsupported_use_ragged_all_to_all_one_shot_kernel(true);
@@ -1556,6 +1560,11 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
                 bool_setter_for(&DebugOptions::set_xla_cpu_use_xnnpack),
                 debug_options->xla_cpu_use_xnnpack(),
                 "Use XNNPACK for supported operations."));
+  flag_list->push_back(tsl::Flag(
+      "xla_cpu_use_new_xtile_lowering",
+      bool_setter_for(&DebugOptions::set_xla_cpu_use_new_xtile_lowering),
+      debug_options->xla_cpu_use_new_xtile_lowering(),
+      "Use new xtile lowering."));
   flag_list->push_back(tsl::Flag(
       "xla_cpu_experimental_xnn_fusion_type",
       SetterForRepeatedEnum<DebugOptions::LibraryFusionType>(
@@ -2754,6 +2763,14 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       "Einsums that have partitioned operand(can be either LHS or RHS) that's "
       "larger than this threshold will be transformed to use windowed einsums."
       "Default is 100000"));
+  flag_list->push_back(tsl::Flag(
+      "xla_gpu_trace_annotation_level",
+      int32_setter_for(&DebugOptions::set_xla_gpu_trace_annotation_level),
+      debug_options->xla_gpu_trace_annotation_level(),
+      "GPU trace annotation detail level. Level 0 emits compact instruction "
+      "names and basic structured payloads. Level 1 additionally emits "
+      "detailed HLO and collective metadata in XProf annotation names and "
+      "structured payloads. NVTX names remain compact."));
   flag_list->push_back(tsl::Flag(
       "xla_gpu_operand_bytes_threshold_for_windowed_einsum",
       int64_setter_for(
