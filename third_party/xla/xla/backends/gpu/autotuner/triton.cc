@@ -170,7 +170,7 @@ TritonBackend::GetSupportedConfigsForScaledDot(const HloInstruction* instr) {
       for (int block_k = 128; block_k <= 256; block_k *= 2) {
         auto any = std::make_unique<google::protobuf::Any>();
         any->PackFrom(TritonGemmConfig(block_m, block_n,
-                                       /*block_k=*/block_k, /*split_k=*/1,
+                                       /*block_k=*/block_k,
                                        /*num_stages=*/1,
                                        /*num_warps=*/4,
                                        /*num_ctas=*/1,
@@ -251,7 +251,7 @@ absl::Status TritonBackend::ApplyConfig(HloInstruction& instr,
 
   // FromProto has validation checks, that's why we call it here.
   TF_RETURN_IF_ERROR(TritonGemmConfig::FromProto(triton_config_proto).status());
-  if (triton_config_proto.split_k() != 1) {
+  if (triton_config_proto.split_k() > 1) {
     return absl::InvalidArgumentError(
         "TritonBackend no longer supports split-k (split_k > 1).");
   }

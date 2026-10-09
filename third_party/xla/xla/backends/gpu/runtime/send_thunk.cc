@@ -45,6 +45,7 @@ limitations under the License.
 #include "xla/stream_executor/stream.h"
 #include "xla/tsl/platform/errors.h"
 #include "xla/tsl/platform/statusor.h"
+#include "xla/util.h"
 #include "xla/xla_data.pb.h"
 
 namespace xla {
@@ -99,6 +100,7 @@ absl::StatusOr<ThunkProto> SendThunk::ToProto() const {
   SendThunkProto* thunk_proto = proto.mutable_send_thunk();
 
   *thunk_proto->mutable_collective_config() = config_.config.ToProto();
+  ASSIGN_OR_RETURN(*thunk_proto->mutable_buffer(), buffer().ToProto());
   std::vector<SourceTarget> source_target_pairs;
   source_target_pairs.reserve(config_.id_to_source_target.size() / 2);
   for (const auto& [key_id, map_entry] : config_.id_to_source_target) {
@@ -126,13 +128,12 @@ absl::Status RunSend(DeviceBufferPair& buffer, se::Stream& stream,
   int device_ordinal = stream.parent()->device_ordinal();
   se::DeviceAddressBase src_addr = buffer.source_buffer;
 
-  VLOG(3) << absl::StreamFormat("[%d] %s : id = %d, target_id = %d",
-                                device_ordinal, device_string, current_id,
-                                target_id);
+  XLA_VLOG_DEVICE(3, device_ordinal) << absl::StreamFormat(
+      "%s : id = %d, target_id = %d", device_string, current_id, target_id);
 
   // Send source buffer to target peer if needed.
-  VLOG(3) << "[" << device_ordinal << "] target_id: " << target_id
-          << ", call comm.Send()";
+  XLA_VLOG_DEVICE(3, device_ordinal)
+      << absl::StreamFormat("target_id = %d, call comm.Send()", target_id);
   auto future = comm.Send(src_addr, buffer.element_type, buffer.element_count,
                           RankId(target_id), GpuCollectives::On(stream));
   TF_RETURN_IF_ERROR(future.Await());
@@ -173,14 +174,16 @@ absl::Status SendThunk::RunCollective(const ExecuteParams& params,
   std::optional<int64_t> target_id = source_target.target;
 
   if (!target_id) {
-    VLOG(3) << "[" << device_ordinal << "] Skipping Send";
+    XLA_VLOG_DEVICE(3, device_ordinal)
+        << absl::StreamFormat("%s : Skipping Send", device_string);
     return absl::OkStatus();
   }
 
-  VLOG(3) << "[" << device_ordinal << "] Performing Send "
-          << ", current_id: " << current_id << ", group mode: "
-          << CollectiveOpGroupModeToString(config_.config.group_mode)
-          << ", hlo_name=(" << hlo_name_ << ")";
+  XLA_VLOG_DEVICE(3, device_ordinal)
+      << "Performing Send "
+      << ", current_id: " << current_id << ", group mode: "
+      << CollectiveOpGroupModeToString(config_.config.group_mode)
+      << ", hlo_name=(" << hlo_name_ << ")";
 
   return RunSend(device_buffer_pair, stream, comm, current_id, *target_id,
                  device_string);
