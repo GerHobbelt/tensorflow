@@ -302,8 +302,7 @@ PjRtStreamExecutorClient::PjRtStreamExecutorClient(
           tsl::Env::Default(), "pjrt_compile_thread_pool",
           std::max<int>(DefaultThreadPoolSize(), client->device_count())),
       async_work_runner_(MakeUnboundedAsyncWorkRunner(
-          "pjrt_async_work_runner", {/*stack_size=*/512 * 1024})),
-      transpose_cache_(1024) {
+          "pjrt_async_work_runner", {/*stack_size=*/512 * 1024})) {
   if (owned_allocator_ != nullptr) {
     allocator_ = owned_allocator_.get();
   } else {
@@ -693,8 +692,7 @@ PjRtStreamExecutorClient::LinearizeHostBufferInto(
     options.dims = dims;
     options.permutation = permutation;
     options.input_striding = TransposePlan::Striding{*byte_strides};
-    absl::MutexLock lock(transpose_mu_);
-    TF_ASSIGN_OR_RETURN(transpose, transpose_cache_.GetOrCreate(options));
+    TF_ASSIGN_OR_RETURN(transpose, GetTransposePlan(options));
   }
 
   bool should_pack = primitive_util::IsSubByteNonPredType(type) &&
@@ -715,8 +713,11 @@ PjRtStreamExecutorClient::LinearizeHostBufferInto(
       !host_and_device_strides_equal || packed_size != size;
   if (must_use_staging_buffer ||
       ShouldStageHostToDeviceTransfers(data, packed_size)) {
-    staging_buffer =
-        GetHostMemoryAllocator()->Allocate(transpose ? size : packed_size);
+    HostMemoryAllocator::AllocateOptions alloc_opts;
+    alloc_opts.numa_node = local_device->executor()->numa_node();
+    alloc_opts.local_device_id = local_device->local_device_id();
+    staging_buffer = GetHostMemoryAllocator()->Allocate(
+        transpose ? size : packed_size, alloc_opts);
   }
 
   // Copy the buffer into a staging buffer before returning control to the
@@ -2023,7 +2024,7 @@ PjRtStreamExecutorClient::CreateDeviceEventSet(size_t preallocated_size) const {
 absl::StatusOr<std::unique_ptr<PjRtRawLoadedExecutable>>
 PjRtStreamExecutorLoadedExecutable::LoadRawExecutable(
     const ExecuteOptions& options, size_t host_callback_idx, xla::RunId run_id,
-    DeviceAndAssignment device_and_assign) const {
+    DeviceAndAssignment device_and_assign, int attempt) const {
   PjRtDevice* device = device_and_assign.device;
   int device_ordinal = tensorflow::down_cast<PjRtStreamExecutorDevice*>(device)
                            ->local_device_state()

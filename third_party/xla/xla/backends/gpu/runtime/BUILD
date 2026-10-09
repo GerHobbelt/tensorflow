@@ -125,6 +125,7 @@ cc_library(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/types:span",
+        "@tsl//tsl/platform:casts",
     ],
 )
 
@@ -452,6 +453,7 @@ cc_library(
     deps = [
         ":async_execution",
         ":collective_params",
+        ":execution_stream_id",
         ":thunk",
         ":thunk_executor",
         ":thunk_proto_cc",
@@ -461,6 +463,7 @@ cc_library(
         "@com_google_absl//absl/base",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
     ],
 )
@@ -471,6 +474,7 @@ xla_test(
     backends = ["gpu"],
     deps = [
         ":async_thunk",
+        ":execution_stream_id",
         ":memset_thunk",
         ":thunk",
         ":thunk_executor",
@@ -1962,6 +1966,7 @@ xla_test(
         ":command_buffer_cmd_emitter",
         ":command_buffer_thunk",
         ":command_executor",
+        ":execution_stream_id",
         ":ragged_all_to_all_thunk",
         ":thunk",
         ":thunk_executor",
@@ -2032,6 +2037,7 @@ xla_test(
         ":command_buffer_cmd_emitter",
         ":command_buffer_thunk",
         ":command_executor",
+        ":execution_stream_id",
         ":thunk",
         ":thunk_executor",
         ":thunk_proto_cc",
@@ -2119,6 +2125,7 @@ xla_test(
         ":command_buffer_cmd_emitter",
         ":command_buffer_thunk",
         ":command_executor",
+        ":execution_stream_id",
         ":thunk",
         ":thunk_executor",
         ":thunk_proto_cc",
@@ -2267,6 +2274,8 @@ cc_library(
         "//xla:executable_run_options",
         "//xla:util",
         "//xla/backends/gpu/collectives:gpu_collectives",
+        "//xla/core/collectives",
+        "//xla/core/collectives:collectives_registry",
         "//xla/runtime:device_id",
         "//xla/service:computation_placer",
         "//xla/service:executable",
@@ -2276,8 +2285,11 @@ cc_library(
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:inlined_vector",
+        "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/types:span",
+        "@tsl//tsl/platform:casts",
     ],
 )
 
@@ -2343,6 +2355,7 @@ cc_library(
         "//xla/service:collective_ops_utils",
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/types:span",
@@ -2549,6 +2562,7 @@ xla_test(
         ":command_buffer_cmd_emitter",
         ":command_buffer_thunk",
         ":command_executor",
+        ":execution_stream_id",
         ":recv_thunk",
         ":send_thunk",
         ":thunk",
@@ -2820,6 +2834,25 @@ xla_cc_test(
 )
 
 cc_library(
+    name = "execution_stream_id",
+    hdrs = ["execution_stream_id.h"],
+    deps = [
+        "//xla/tsl/lib/gtl:int_type",
+        "@com_google_absl//absl/strings:str_format",
+    ],
+)
+
+xla_cc_test(
+    name = "execution_stream_id_test",
+    srcs = ["execution_stream_id_test.cc"],
+    deps = [
+        ":execution_stream_id",
+        "@com_google_absl//absl/strings",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_library(
     name = "thunk",
     srcs = ["thunk.cc"],
     hdrs = ["thunk.h"],
@@ -2829,6 +2862,7 @@ cc_library(
         ":collective_memory",
         ":collective_memory_requests",
         ":collective_params",
+        ":execution_stream_id",
         ":thunk_id",
         ":thunk_kind_proto_cc",
         ":thunk_proto_cc",
@@ -3092,33 +3126,6 @@ xla_test(
         "@com_google_absl//absl/status:status_matchers",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings:string_view",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_library(
-    name = "wait_for_streams_thunk",
-    srcs = ["wait_for_streams_thunk.cc"],
-    hdrs = ["wait_for_streams_thunk.h"],
-    deps = [
-        ":thunk",
-        ":thunk_proto_cc",
-        "//xla/stream_executor:stream",
-        "//xla/tsl/platform:statusor",
-        "@com_google_absl//absl/log",
-        "@com_google_absl//absl/status",
-        "@com_google_absl//absl/status:statusor",
-    ],
-)
-
-xla_cc_test(
-    name = "wait_for_streams_thunk_test",
-    srcs = ["wait_for_streams_thunk_test.cc"],
-    deps = [
-        ":thunk",
-        ":thunk_proto_cc",
-        ":wait_for_streams_thunk",
-        "//xla/tsl/platform:statusor",
         "@com_google_googletest//:gtest_main",
     ],
 )
@@ -3622,7 +3629,6 @@ cc_library(
         ":thunk",
         ":thunk_proto_cc",
         ":triangular_solve_thunk",
-        ":wait_for_streams_thunk",
         ":while_thunk",
         "//xla:util",
         "//xla/backends/cpu:target_machine_options",
@@ -3653,6 +3659,7 @@ xla_cc_test(
         ":custom_kernel_thunk",
         ":device_to_device_copy_thunk",
         ":device_to_host_copy_thunk",
+        ":execution_stream_id",
         ":host_execute_thunk",
         ":host_send_recv_thunk",
         ":host_to_device_copy_thunk",
@@ -3890,6 +3897,7 @@ cc_library(
         "//xla/stream_executor:stream",
         "//xla/tsl/platform:errors",
         "//xla/tsl/platform:statusor",
+        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/memory",
@@ -4082,6 +4090,7 @@ xla_test(
         ":conditional_thunk",
         ":cudnn_thunk",
         ":device_to_device_copy_thunk",
+        ":execution_stream_id",
         ":gemm_thunk",
         ":replica_id_thunk",
         ":sequential_thunk",

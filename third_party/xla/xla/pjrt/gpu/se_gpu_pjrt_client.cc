@@ -44,7 +44,6 @@ limitations under the License.
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
 #include "absl/types/span.h"
-#include "xla/backends/cpu/target_machine_options.h"
 #include "xla/backends/gpu/collectives/gpu_clique.h"
 #include "xla/backends/gpu/collectives/gpu_clique_key.h"
 #include "xla/backends/gpu/collectives/gpu_cliques.h"
@@ -208,15 +207,6 @@ static absl::flat_hash_map<std::string, PjRtDeviceAttribute> GetAttrsForDevices(
       attrs["target_config"] = std::move(attr);
     }
   }
-
-  std::string host_target_machine_options;
-  if (tsl::protobuf::TextFormat::PrintToString(
-          xla::cpu::TargetMachineOptions().ToProto(),
-          &host_target_machine_options)) {
-    attrs["host_target_machine_options"] =
-        std::move(host_target_machine_options);
-  }
-
   return attrs;
 }
 
@@ -1701,14 +1691,7 @@ absl::StatusOr<DeviceTopologyPair> BuildDistributedDevices(
     LOG(INFO) << "Failed to get network nodes: " << network_nodes.status();
   }
 
-  std::optional<gpu::GpuTargetConfig> gpu_target_config;
-
   for (const auto& [ordinal, device] : local_device_states) {
-    // We expect all devices on a host to have the same target config, so we
-    // only need to get the target config for the first device.
-    if (!gpu_target_config.has_value()) {
-      gpu_target_config.emplace(device->executor());
-    }
     const se::Platform* platform = device->executor()->GetPlatform();
     TF_ASSIGN_OR_RETURN(
         std::unique_ptr<xla::se::DeviceDescription> desc,
@@ -1729,16 +1712,6 @@ absl::StatusOr<DeviceTopologyPair> BuildDistributedDevices(
       device_proto->set_fabric_uuid(
           absl::StrCat(info.cluster_uuid, "/", info.clique_id));
     }
-  }
-
-  if (!gpu_target_config.has_value()) {
-    // A PjRtClient without any devices makes no sense, but we need to support
-    // it for compatibility with Tensorflow. So we create an empty GPU target
-    // config.
-    stream_executor::GpuTargetConfigProto gpu_target_config_proto;
-    gpu_target_config_proto.set_platform_name(platform_name);
-    ASSIGN_OR_RETURN(gpu_target_config,
-                     gpu::GpuTargetConfig::FromProto(gpu_target_config_proto));
   }
 
   GlobalTopologyProto global_topology;
@@ -1889,8 +1862,7 @@ absl::StatusOr<DeviceTopologyPair> BuildDistributedDevices(
   }
 
   TF_ASSIGN_OR_RETURN(GpuTopologyProto gpu_topology,
-                      BuildGpuTopology(global_topology, *gpu_target_config,
-                                       cpu::TargetMachineOptions()));
+                      BuildGpuTopology(global_topology));
   return std::make_pair(std::move(devices), gpu_topology);
 }
 
@@ -2007,7 +1979,9 @@ absl::StatusOr<std::unique_ptr<PjRtClient>> GetStreamExecutorGpuClient(
         local_device_states.begin()->second->compute_stream()->parent();
     HostMemoryAllocator::Options allocator_options;
     allocator_options.alignment = tsl::Allocator::kAllocatorAlignment;
-    allocator_options.map_fn = [stream_executor](void* data, size_t size) {
+    allocator_options.map_fn = [stream_executor](
+                                   std::optional<LocalDeviceId> local_device_id,
+                                   void* data, size_t size) {
       bool success = stream_executor->HostMemoryRegister(data, size);
       if (!success) {
         return absl::InternalError(absl::StrFormat(
@@ -2015,14 +1989,16 @@ absl::StatusOr<std::unique_ptr<PjRtClient>> GetStreamExecutorGpuClient(
       }
       return absl::OkStatus();
     };
-    allocator_options.unmap_fn = [stream_executor](void* data) {
-      bool success = stream_executor->HostMemoryUnregister(data);
-      if (!success) {
-        return absl::InternalError(absl::StrFormat(
-            "Failed to unregister host memory at address: %ps", data));
-      }
-      return absl::OkStatus();
-    };
+    allocator_options.unmap_fn =
+        [stream_executor](std::optional<LocalDeviceId> local_device_id,
+                          void* data) {
+          bool success = stream_executor->HostMemoryUnregister(data);
+          if (!success) {
+            return absl::InternalError(absl::StrFormat(
+                "Failed to unregister host memory at address: %ps", data));
+          }
+          return absl::OkStatus();
+        };
     TF_ASSIGN_OR_RETURN(
         host_memory_allocator,
         options.host_memory_allocator_factory(std::move(allocator_options)));

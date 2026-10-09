@@ -48,6 +48,7 @@ limitations under the License.
 #include "xla/backends/gpu/collectives/gpu_clique_key.h"
 #include "xla/backends/gpu/collectives/gpu_collectives.h"
 #include "xla/backends/gpu/runtime/annotation.h"
+#include "xla/backends/gpu/runtime/async_thunk.h"
 #include "xla/backends/gpu/runtime/collective_clique_requests.h"
 #include "xla/backends/gpu/runtime/collective_cliques.h"
 #include "xla/backends/gpu/runtime/collective_memory.h"
@@ -66,6 +67,8 @@ limitations under the License.
 #include "xla/backends/gpu/runtime/thunk_proto_deserialization.h"
 #include "xla/client/executable_build_options.h"
 #include "xla/core/collectives/clique_key.h"
+#include "xla/core/collectives/collectives.h"
+#include "xla/core/collectives/collectives_registry.h"
 #include "xla/core/collectives/communicator.h"
 #include "xla/executable_run_options.h"
 #include "xla/hlo/ir/hlo_input_output_alias_config.h"
@@ -124,6 +127,7 @@ limitations under the License.
 #include "xla/util/split_proto/split_executable_and_options_writer.h"
 #include "xla/util/split_proto/split_gpu_executable_writer.h"
 #include "xla/xla.pb.h"
+#include "tsl/platform/casts.h"
 #include "tsl/platform/random.h"
 #include "tsl/profiler/lib/scoped_annotation.h"
 #include "tsl/profiler/lib/traceme.h"
@@ -190,19 +194,21 @@ class GpuExecutableThunkPassBufferAllocator : public ThunkPassBufferAllocator {
 
 using ::tsl::profiler::ScopedAnnotation;
 
-// Returns the set of `ExecutionStreamIds` requested by all `Thunks` in the
-// `GpuExecutable`. At run time `Thunks` may use additional streams to launch
-// compute operations in parallel.
-static absl::flat_hash_set<ExecutionStreamId> GetExecutionStreamIds(
-    ThunkExecutor& executor) {
-  absl::flat_hash_set<ExecutionStreamId> stream_ids;
+// Returns the number of additional compute streams needed by all
+// `AsyncStartThunks` in the `GpuExecutable`.
+static int64_t GetNumAdditionalComputeStreams(ThunkExecutor& executor) {
+  int64_t num_streams = 0;
   CHECK_OK(executor.thunks().WalkNested([&](Thunk* thunk) -> absl::Status {
-    if (thunk->execution_stream_id() > 0) {
-      stream_ids.insert(thunk->execution_stream_id());
+    if (auto* async_start = dynamic_cast<AsyncStartThunk*>(thunk)) {
+      auto stream_id = async_start->execution_stream_id();
+      if (stream_id.is_computation()) {
+        num_streams = std::max<int64_t>(num_streams,
+                                        stream_id.computation_id().value() + 1);
+      }
     }
     return absl::OkStatus();
   }));
-  return stream_ids;
+  return num_streams;
 }
 
 static absl::Status RunThunkPasses(const DebugOptions& debug_options,
@@ -327,7 +333,8 @@ GpuExecutable::GpuExecutable(
       dnn_compiled_graphs_(std::move(dnn_compiled_graphs)),
       gpu_version_(device_description.gpu_compute_capability()),
       thunk_executor_(std::move(executable)),
-      execution_stream_ids_(GetExecutionStreamIds(*thunk_executor_)),
+      num_additional_compute_streams_(
+          GetNumAdditionalComputeStreams(*thunk_executor_)),
       module_name_(std::move(module_name)),
       program_shape_(std::move(program_shape)),
       allocation_ptrs_(GatherAllocationPtrs(
@@ -432,14 +439,16 @@ absl::Status BarrierAfterExecutable(
     const DebugOptions* absl_nullable debug_options, se::Stream& stream_to_sync,
     size_t num_participants);
 
-absl::Status ExecuteThunksImpl(
-    const DebugOptions* debug_options, const std::string& module_name,
-    ModuleIdentifier module_id, ThunkExecutor& thunk_executor,
-    Thunk::ExecutableSource executable_source,
-    const ServiceExecutableRunOptions* run_options,
-    const BufferAllocations& buffer_allocations, bool block_host_until_done,
-    const absl::flat_hash_set<ExecutionStreamId>& execution_stream_ids,
-    CollectiveMemoryCache& collective_memory_cache) {
+absl::Status ExecuteThunksImpl(const DebugOptions* debug_options,
+                               const std::string& module_name,
+                               ModuleIdentifier module_id,
+                               ThunkExecutor& thunk_executor,
+                               Thunk::ExecutableSource executable_source,
+                               const ServiceExecutableRunOptions* run_options,
+                               const BufferAllocations& buffer_allocations,
+                               bool block_host_until_done,
+                               int64_t num_additional_compute_streams,
+                               CollectiveMemoryCache& collective_memory_cache) {
   bool mock_collectives =
       run_options->run_options().gpu_executable_run_options()
           ? run_options->run_options()
@@ -548,19 +557,22 @@ absl::Status ExecuteThunksImpl(
                             std::move(pre_abort)));
   }
 
+  constexpr int64_t kAsyncStreamTotal =
+      static_cast<int64_t>(AsyncStreamKind::ASYNC_STREAM_KIND_MEMCPYP2P) + 1;
+
   // Borrow streams required for CollectiveThunk.
   absl::InlinedVector<se::Stream*, kAsyncStreamTotal> async_comms_streams(
       kAsyncStreamTotal, nullptr);
   se::Stream* command_buffer_trace_stream = nullptr;
-  std::vector<StreamPool::Ptr> async_comms_streams_ownr;
+  std::vector<StreamPool::Ptr> async_comms_streams_owner;
   StreamPool::Ptr borrowed_command_buffer_trace_stream;
   if (run_options->HasStreamBorrower()) {
     ASSIGN_OR_RETURN(
-        async_comms_streams_ownr,
+        async_comms_streams_owner,
         run_options->BorrowStreams(executor->device_ordinal(),
                                    kAsyncStreamTotal, stream_priority));
     for (int64_t i = 0; i < kAsyncStreamTotal; ++i) {
-      async_comms_streams[i] = async_comms_streams_ownr[i].get();
+      async_comms_streams[i] = async_comms_streams_owner[i].get();
     }
 
     // Borrow stream for tracing command buffers.
@@ -569,28 +581,28 @@ absl::Status ExecuteThunksImpl(
     command_buffer_trace_stream = borrowed_command_buffer_trace_stream.get();
   }
 
-  // Borrow stream for additional compute streams
-  Thunk::ExecutionStreamIdMap additional_execution_streams;
-  std::vector<StreamPool::Ptr> additional_streams;
-  if (!execution_stream_ids.empty()) {
+  // Borrow streams for additional compute streams.
+  std::vector<se::Stream*> additional_compute_streams;
+  std::vector<StreamPool::Ptr> borrowed_compute_streams;
+  if (num_additional_compute_streams > 0) {
     if (run_options->HasStreamBorrower()) {
-      ASSIGN_OR_RETURN(additional_streams,
-                       run_options->BorrowStreams(executor->device_ordinal(),
-                                                  execution_stream_ids.size()));
-      int64_t i = 0;
-      for (ExecutionStreamId stream_id : execution_stream_ids) {
-        additional_execution_streams[stream_id] =
-            additional_streams.at(i).get();
-        i++;
+      ASSIGN_OR_RETURN(
+          borrowed_compute_streams,
+          run_options->BorrowStreams(executor->device_ordinal(),
+                                     num_additional_compute_streams));
+      additional_compute_streams.reserve(num_additional_compute_streams);
+      for (auto& stream : borrowed_compute_streams) {
+        additional_compute_streams.push_back(stream.get());
       }
-      VLOG(2) << "Using " << additional_execution_streams.size()
-              << " additional compute streams.";
+      XLA_VLOG_DEVICE(2, run_options->device_ordinal())
+          << absl::StreamFormat("Using %d additional compute streams.",
+                                num_additional_compute_streams);
     } else {
-      VLOG(2) << "No stream borrower created. "
-              << "Assigning the default stream to all parallel computes.";
-      for (ExecutionStreamId stream_id : execution_stream_ids) {
-        additional_execution_streams[stream_id] = main_stream;
-      }
+      XLA_VLOG_DEVICE(2, run_options->device_ordinal())
+          << "No stream borrower created. "
+          << "Assigning the default stream to all parallel computes.";
+      additional_compute_streams.assign(num_additional_compute_streams,
+                                        main_stream);
     }
   }
 
@@ -610,10 +622,17 @@ absl::Status ExecuteThunksImpl(
   Thunk::ExecutionScopedState execution_scoped_state;
 
   // Parameters for executing collective operations.
+  std::optional<std::string> collectives_impl_name;
+  if (debug_options &&
+      !debug_options->xla_gpu_collectives_implementation().empty()) {
+    collectives_impl_name = debug_options->xla_gpu_collectives_implementation();
+  }
+
   ASSIGN_OR_RETURN(CollectiveParams collective_params,
                    CollectiveParams::Create(
                        *run_options, async_comms_streams,
                        LocalDeviceId(main_stream->parent()->device_ordinal()),
+                       std::move(collectives_impl_name),
                        collective_max_nchannels, p2p_max_nchannels));
 
   CollectiveCliqueRequests collective_clique_requests;
@@ -630,9 +649,9 @@ absl::Status ExecuteThunksImpl(
   }
 
   XLA_VLOG_DEVICE(3, run_options->device_ordinal()) << absl::StreamFormat(
-      "Prepared GPU executable for execution: #collective=[cliques=%d, "
-      "symmetric=%d]",
-      collective_clique_requests.size(),
+      "Prepared GPU executable module: %s for execution: "
+      "#collective=[cliques=%d, symmetric=%d]",
+      module_name, collective_clique_requests.size(),
       collective_memory_requests.symmetric_size());
 
   std::vector<std::unique_ptr<CliqueKey>>* clique_keys =
@@ -688,7 +707,7 @@ absl::Status ExecuteThunksImpl(
   Thunk::ExecuteParams execute_params = Thunk::ExecuteParams::Create(
       *run_options, buffer_allocations, main_stream,
       command_buffer_trace_stream, &collective_params, &collective_cliques,
-      &collective_memory, std::move(additional_execution_streams),
+      &collective_memory, std::move(additional_compute_streams),
       &execution_scoped_state);
 
   XLA_VLOG_DEVICE(1, run_options->device_ordinal())
@@ -776,9 +795,9 @@ absl::Status RendezvousAfterInitialization(
     }
   }
 
-  VLOG(1) << absl::StrFormat("Join thunks initialization rendezvous with ")
-          << num_local_participants << " local participants"
-          << "; device_ordinal=" << run_options.device_ordinal();
+  XLA_VLOG_DEVICE(1, run_options.device_ordinal()) << absl::StreamFormat(
+      "Join thunks initialization rendezvous with %d local participants",
+      num_local_participants);
 
   tsl::profiler::TraceMe trace([&] {
     return tsl::profiler::TraceMeEncode(
@@ -848,11 +867,11 @@ absl::Status BarrierAfterExecutable(
   } else {
     RETURN_IF_ERROR(stream.BlockHostUntilDone());
 
-    VLOG(1)
-        << absl::StrFormat(
-               "Join thunks in barrier after module execution rendezvous with ")
-        << num_participants << " local participants"
-        << "; device_ordinal=" << run_options.device_ordinal();
+    XLA_VLOG_DEVICE(1, run_options.device_ordinal()) << absl::StreamFormat(
+        "Join thunks in barrier after module execution rendezvous with %d "
+        "local "
+        "participants",
+        num_participants);
 
     tsl::profiler::TraceMe trace([&] {
       return tsl::profiler::TraceMeEncode(
@@ -927,8 +946,8 @@ GpuExecutable::ResolveConstantGlobals(se::Stream* stream) {
     // The constant was defined in the PTX and has been allocated by the CUDA
     // driver.
     global = *global_status;
-    VLOG(3) << "Resolved global " << info.symbol_name << " to "
-            << global.opaque();
+    XLA_VLOG_DEVICE(3, executor->device_ordinal()) << absl::StreamFormat(
+        "Resolved global %s to %p", info.symbol_name, global.opaque());
 
     if (!info.content.span().empty()) {
       // This means the constant did not have an initializer in the PTX and
@@ -1038,14 +1057,32 @@ static absl::Status CheckAlignment(const BufferAllocation& allocation,
 }
 
 // Resolve GpuCollectives instance that we should use for the run.
+// TODO(ezhulenev): We have almost identical method in `collective_params.cc`,
+// this one has to be removed.
 static GpuCollectives* ResolveGpuCollectives(
-    const ServiceExecutableRunOptions* run_options) {
+    const ServiceExecutableRunOptions* run_options,
+    const DebugOptions* debug_options) {
+  auto* gpu_options = run_options->run_options().gpu_executable_run_options();
+  if (gpu_options && gpu_options->collectives()) {
+    return gpu_options->collectives();
+  }
+
   absl::string_view platform_name =
       run_options->run_options().stream()->parent()->GetPlatform()->Name();
-  auto* gpu_options = run_options->run_options().gpu_executable_run_options();
-  return gpu_options && gpu_options->collectives()
-             ? gpu_options->collectives()
-             : GpuCollectives::Default(platform_name);
+
+  // If debug options specify a collectives implementation by name, look it up
+  // in the registry. Otherwise, use the default (highest-priority) one.
+  if (debug_options &&
+      !debug_options->xla_gpu_collectives_implementation().empty()) {
+    absl::StatusOr<Collectives*> collectives = CollectivesRegistry::Get(
+        platform_name, debug_options->xla_gpu_collectives_implementation());
+    CHECK_OK(collectives)  // Crash OK
+        << "Failed to get GPU collectives implementation: "
+        << debug_options->xla_gpu_collectives_implementation();
+    return tsl::down_cast<GpuCollectives*>(*collectives);
+  }
+
+  return GpuCollectives::Default(platform_name);
 }
 
 absl::StatusOr<BufferAllocations> GpuExecutable::GenerateBufferAllocations(
@@ -1056,8 +1093,11 @@ absl::StatusOr<BufferAllocations> GpuExecutable::GenerateBufferAllocations(
       [&] { return std::string("Build buffer allocations"); },
       tsl::profiler::TraceMeLevel::kInfo);
 
+  const DebugOptions* debug_options =
+      has_module() ? &module_config().debug_options() : nullptr;
+
   absl::flat_hash_map<LogicalBuffer::Color, int64_t> allocate_granularity;
-  if (auto* collectives = ResolveGpuCollectives(run_options)) {
+  if (auto* collectives = ResolveGpuCollectives(run_options, debug_options)) {
     // BFC allocator ignores memory alignment and always allocates 256 byte
     // aligned buffers, however for collective memory underlying libraries
     // require larger alignment. We conservatively round up all allocation
@@ -1146,7 +1186,7 @@ absl::StatusOr<ExecutionOutput> GpuExecutable::ExecuteAsyncOnStreamImpl(
   ASSIGN_OR_RETURN(BufferAllocations buffer_allocations,
                    GenerateBufferAllocations(run_options, arguments, globals,
                                              memory_allocator, device_ordinal));
-  VLOG(3) << buffer_allocations.ToString();
+  XLA_VLOG_DEVICE(3, device_ordinal) << buffer_allocations.ToString();
   absl::Span<const BufferAllocation* const> allocations = GetAllocations();
 
   std::set<se::DeviceAddressBase> buffers_in_result;
@@ -1174,8 +1214,9 @@ absl::StatusOr<ExecutionOutput> GpuExecutable::ExecuteAsyncOnStreamImpl(
         allocations[output_info.allocation_index];
     se::DeviceAddressBase& result_buffer = p.second;
 
-    VLOG(4) << "Looking at: allocation " << output_info.allocation_index
-            << " @ index: " << index.ToString();
+    XLA_VLOG_DEVICE(4, device_ordinal)
+        << "Looking at: allocation " << output_info.allocation_index
+        << " @ index: " << index.ToString();
 
     if (output_info.alias_config) {
       MaybeOwningDeviceAddress* maybe_owning_memory =
@@ -1224,8 +1265,9 @@ absl::StatusOr<ExecutionOutput> GpuExecutable::ExecuteAsyncOnStreamImpl(
         // The guard is above is not to insert copy-protection when aliasing
         // pass-through params, as we do not need to write into the output
         // buffer.
-        VLOG(3) << "Using copy-protection: aliasing is specified, but the "
-                   "buffer is not donated; allocating a fresh buffer";
+        XLA_VLOG_DEVICE(3, device_ordinal)
+            << "Using copy-protection: aliasing is specified, but the "
+               "buffer is not donated; allocating a fresh buffer";
         int64_t allocation_size = ShapeUtil::ByteSizeOf(
             ShapeUtil::GetSubshape(program_shape_.result(), index));
         absl::StatusOr<se::ScopedDeviceAddress<uint8_t>> allocated_buffer =
@@ -1477,17 +1519,18 @@ absl::Status GpuExecutable::ExecuteThunksWithVaRemapping(
     void* va_base = (va_ranges->va_reservation != nullptr)
                         ? va_ranges->va_reservation->address().opaque()
                         : nullptr;
-    VLOG(3) << "VA remapping: Mapped " << allocation_va_offsets.size()
-            << " allocations to single VA range at " << va_base;
+    XLA_VLOG_DEVICE(3, executor->device_ordinal()) << absl::StreamFormat(
+        "VA remapping: Mapped %d allocations to single VA range at %p",
+        allocation_va_offsets.size(), va_base);
     for (const auto& [alloc_idx, va_offset] : allocation_va_offsets) {
       se::DeviceAddressBase physical_addr =
           buffer_allocations.GetDeviceAddress(alloc_idx);
       void* va_ptr = reinterpret_cast<void*>(
           reinterpret_cast<uintptr_t>(va_base) + va_offset);
-      VLOG(3) << "  allocation[" << alloc_idx
-              << "] physical: " << physical_addr.opaque()
-              << " -> VA: " << va_ptr << " (offset: " << va_offset << ")"
-              << " size: " << physical_addr.size();
+      XLA_VLOG_DEVICE(3, executor->device_ordinal()) << absl::StreamFormat(
+          "  allocation[%d] physical: %p -> VA: %p (offset: %d) size: %d",
+          alloc_idx, physical_addr.opaque(), va_ptr, va_offset,
+          physical_addr.size());
     }
   }
 
@@ -1499,8 +1542,8 @@ absl::Status GpuExecutable::ExecuteThunksWithVaRemapping(
   TF_RETURN_IF_ERROR(ExecuteThunksImpl(
       has_module() ? &module_config().debug_options() : nullptr, module_name_,
       unique_id, *thunk_executor_, executable_source, run_options,
-      remapped_buffer_allocations, block_host_until_done, execution_stream_ids_,
-      collective_memory_cache_));
+      remapped_buffer_allocations, block_host_until_done,
+      num_additional_compute_streams_, collective_memory_cache_));
 
   // Record event so VA range can be reclaimed after GPU finishes.
   TF_RETURN_IF_ERROR(
@@ -1556,11 +1599,11 @@ absl::Status GpuExecutable::ExecuteThunks(
     }
 
     if (!changed_allocations.empty()) {
-      VLOG(5) << "Buffer allocations changed address between module "
-              << module_name_ << " executions: ["
-              << absl::StrJoin(changed_allocations, ", ",
-                               absl::PairFormatter(":"))
-              << "]";
+      XLA_VLOG_DEVICE(5, executor->device_ordinal()) << absl::StreamFormat(
+          "Buffer allocations changed address between module %s executions: "
+          "[%s]",
+          module_name_,
+          absl::StrJoin(changed_allocations, ", ", absl::PairFormatter(":")));
     }
   }
 
@@ -1603,8 +1646,8 @@ absl::Status GpuExecutable::ExecuteThunks(
     TF_RETURN_IF_ERROR(ExecuteThunksImpl(
         has_module() ? &module_config().debug_options() : nullptr, module_name_,
         unique_id, *thunk_executor_, executable_source, run_options,
-        buffer_allocations, block_host_until_done, execution_stream_ids_,
-        collective_memory_cache_));
+        buffer_allocations, block_host_until_done,
+        num_additional_compute_streams_, collective_memory_cache_));
   }
   return absl::OkStatus();
 }

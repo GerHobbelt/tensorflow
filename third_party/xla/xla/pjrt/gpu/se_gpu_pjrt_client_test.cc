@@ -130,8 +130,6 @@ limitations under the License.
 namespace xla {
 namespace {
 
-using ::testing::_;
-using ::testing::Contains;
 using ::testing::ElementsAre;
 using ::testing::ElementsAreArray;
 using ::testing::Eq;
@@ -139,7 +137,6 @@ using ::testing::FloatEq;
 using ::testing::Ge;
 using ::testing::Gt;
 using ::testing::HasSubstr;
-using ::testing::Pair;
 using ::testing::SizeIs;
 
 absl::StatusOr<std::unique_ptr<xla::PjRtLoadedExecutable>> CompileExecutable(
@@ -1885,6 +1882,8 @@ TEST(StreamExecutorGpuClientTest, ExecutePinnedHostOutputTest) {
   EXPECT_EQ(memory_stats.output_size_in_bytes, 0);
   EXPECT_EQ(memory_stats.host_output_size_in_bytes, 16);
   EXPECT_GE(memory_stats.peak_memory_in_bytes, 0);
+  EXPECT_GE(memory_stats.total_allocation_bytes, 0);
+  EXPECT_GE(memory_stats.indefinite_allocations, 0);
 }
 
 TEST(StreamExecutorGpuClientTest, ExecutePinnedHostOutputTupleTest) {
@@ -3241,24 +3240,6 @@ ENTRY %Add.6 (a.1: f32[], b.2: f32[]) -> (f32[], f32[]) {
       std::unique_ptr<PjRtRuntimeAbiVersion> runtime_abi_version,
       client->RuntimeAbiVersion());
   EXPECT_OK(runtime_abi_version->IsCompatibleWith(*executable_abi_version));
-}
-
-TEST(StreamExecutorGpuClientTest,
-     TopologyDescriptionHasTargetConfigAndHostTargetMachineOptions) {
-  ASSERT_OK_AND_ASSIGN(std::unique_ptr<PjRtClient> client,
-                       GetStreamExecutorGpuClient(DefaultOptions()));
-  ASSERT_OK_AND_ASSIGN(const PjRtTopologyDescription* topology,
-                       client->GetTopologyDescription());
-  EXPECT_THAT(topology->Attributes(), Contains(Pair("target_config", _)));
-  EXPECT_THAT(topology->Attributes(),
-              Contains(Pair("host_target_machine_options", _)));
-
-  auto se_topology =
-      dynamic_cast<const StreamExecutorGpuTopologyDescription*>(topology);
-  ASSERT_NE(se_topology, nullptr);
-  EXPECT_TRUE(se_topology->gpu_topology().has_gpu_target_config());
-  EXPECT_TRUE(
-      se_topology->gpu_topology().host_target_machine_options().has_value());
 }
 
 static std::string SuccessfulCrossHostTransferTestName(

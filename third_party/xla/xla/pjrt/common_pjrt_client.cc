@@ -54,6 +54,7 @@ limitations under the License.
 #include "xla/pjrt/pjrt_client.h"
 #include "xla/pjrt/pjrt_executable.h"
 #include "xla/pjrt/raw_buffer.h"
+#include "xla/pjrt/transpose.h"
 #include "xla/pjrt/utils.h"
 #include "xla/primitive_util.h"
 #include "xla/shape.h"
@@ -488,6 +489,12 @@ tsl::Future<> CommonPjRtClient::MakeTrackedReadyFuture(
     }
   });
   return result;
+}
+
+absl::StatusOr<std::shared_ptr<TransposePlan>>
+CommonPjRtClient::GetTransposePlan(const TransposePlan::Options& options) {
+  absl::MutexLock lock(&transpose_mu_);
+  return transpose_cache_.GetOrCreate(options);
 }
 
 Future<> CommonPjRtRawBufferImpl::CopyRawHostToDevice(const void* src,
@@ -995,7 +1002,7 @@ absl::Status CommonPjRtLoadedExecutable::ExecutePrepare(
     ExecuteLaunchArgs& launch_args,
     absl::Span<PjRtBuffer* const> argument_handles, xla::RunId run_id,
     int replica, int partition, const ExecuteOptions& options,
-    size_t host_callback_idx, PjRtDevice* device) const {
+    size_t host_callback_idx, PjRtDevice* device, int attempt) const {
   tsl::profiler::TraceMe traceme("CommonPjRtLoadedExecutable::ExecutePrepare");
   TF_ASSIGN_OR_RETURN(
       auto device_and_assign,
@@ -1044,7 +1051,7 @@ absl::Status CommonPjRtLoadedExecutable::ExecutePrepare(
 
   TF_ASSIGN_OR_RETURN(launch_args.executable,
                       LoadRawExecutable(options, host_callback_idx, run_id,
-                                        std::move(device_and_assign)));
+                                        std::move(device_and_assign), attempt));
   launch_args.options = &options;
   launch_args.is_predetermined_error = is_error;
   launch_args.output_leaf_buffers = std::move(output_leaf_buffers);
@@ -1139,7 +1146,7 @@ absl::Status CommonPjRtLoadedExecutable::ExecutePrepareWithOomRetries(
     launch_args.emplace();
     prepare_status =
         ExecutePrepare(*launch_args, argument_handles, run_id, replica,
-                       partition, options, host_callback_idx, device);
+                       partition, options, host_callback_idx, device, attempts);
     ++attempts;
     if (!absl::IsResourceExhausted(prepare_status)) {
       break;

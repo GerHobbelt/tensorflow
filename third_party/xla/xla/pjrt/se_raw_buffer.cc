@@ -126,6 +126,7 @@ PjRtStreamExecutorRawBuffer::CopyRawHostToDeviceAndReturnEvent(
           }
           HostMemoryAllocator::AllocateOptions alloc_opts;
           alloc_opts.numa_node = stream->parent()->numa_node();
+          alloc_opts.local_device_id = local_device->local_device_id();
           staging_buffer = client->GetHostMemoryAllocator()->Allocate(
               transfer_size, alloc_opts);
           auto copy_to_staging_buffer = [src, transfer_size,
@@ -181,6 +182,7 @@ PjRtStreamExecutorRawBuffer::CopyRawDeviceToHostAndReturnEvent(
           }
           HostMemoryAllocator::AllocateOptions alloc_opts;
           alloc_opts.numa_node = stream->parent()->numa_node();
+          alloc_opts.local_device_id = local_device->local_device_id();
           std::shared_ptr<void> staging_buffer =
               client->GetHostMemoryAllocator()->Allocate(transfer_size,
                                                          alloc_opts);
@@ -295,17 +297,14 @@ void PjRtStreamExecutorRawBuffer::CopyToLiteralAsync(
             options.dims = on_device_shape.dimensions();
             options.permutation = permutation;
             options.input_striding = TransposePlan::Striding{byte_strides};
-            {
-              absl::MutexLock lock(client->transpose_mu_);
-              absl::StatusOr<std::shared_ptr<TransposePlan>> t =
-                  client->transpose_cache_.GetOrCreate(options);
-              if (!t.ok()) {
-                promise.Set(t.status());
-                client->SetEventAsError(usage_event, t.status());
-                return;
-              }
-              transpose = *std::move(t);
+            absl::StatusOr<std::shared_ptr<TransposePlan>> t =
+                client->GetTransposePlan(options);
+            if (!t.ok()) {
+              promise.Set(t.status());
+              client->SetEventAsError(usage_event, t.status());
+              return;
             }
+            transpose = *std::move(t);
           }
         }
 
@@ -445,6 +444,7 @@ void PjRtStreamExecutorRawBuffer::CopyTo(
   } else {
     HostMemoryAllocator::AllocateOptions alloc_opts;
     alloc_opts.numa_node = local_device_->executor()->numa_node();
+    alloc_opts.local_device_id = local_device_->local_device_id();
     std::shared_ptr<void> staging_buffer =
         client_->GetHostMemoryAllocator()->Allocate(GetOnDeviceSizeInBytes(),
                                                     alloc_opts);
