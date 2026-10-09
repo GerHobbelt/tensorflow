@@ -246,12 +246,13 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
 
   opts.set_xla_gpu_enable_cublaslt(true);
 
-  opts.add_xla_gpu_enable_command_buffer(DebugOptions::FUSION);
+  opts.add_xla_gpu_enable_command_buffer(DebugOptions::CONDITIONAL);
   opts.add_xla_gpu_enable_command_buffer(DebugOptions::CUBLAS);
   opts.add_xla_gpu_enable_command_buffer(DebugOptions::CUBLASLT);
-  opts.add_xla_gpu_enable_command_buffer(DebugOptions::CUSTOM_CALL);
   opts.add_xla_gpu_enable_command_buffer(DebugOptions::CUDNN);
+  opts.add_xla_gpu_enable_command_buffer(DebugOptions::CUSTOM_CALL);
   opts.add_xla_gpu_enable_command_buffer(DebugOptions::DYNAMIC_SLICE_FUSION);
+  opts.add_xla_gpu_enable_command_buffer(DebugOptions::FUSION);
   opts.set_xla_gpu_graph_min_graph_size(5);
   opts.set_xla_gpu_command_buffer_scheduling_mode(DebugOptions::LHS);
   opts.set_xla_gpu_command_buffer_unroll_loops(false);
@@ -290,6 +291,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_recognize_reduction_optimization_level(0);
 
   opts.set_xla_gpu_enable_dynamic_slice_fusion(false);
+  opts.set_xla_gpu_experimental_dynamic_slice_fusion_verify_offsets(false);
   opts.set_xla_gpu_nccl_termination_timeout_seconds(-1);
   opts.set_xla_gpu_enable_shared_constants(true);
   opts.set_xla_gpu_enable_nccl_user_buffers(false);
@@ -439,8 +441,10 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
       DebugOptions::PGLE_STRICTNESS_LEVEL_WARN);
 
   opts.set_xla_gpu_executable_embed_debug_info(true);
-  opts.set_xla_gpu_executable_warn_stuck_timeout_seconds(10);
+  opts.set_xla_gpu_executable_num_compute_streams(0);
+  opts.set_xla_gpu_executable_num_communication_streams(0);
   opts.set_xla_gpu_executable_terminate_timeout_seconds(30);
+  opts.set_xla_gpu_executable_warn_stuck_timeout_seconds(10);
   opts.set_xla_gpu_execution_terminate_timeout("inf");
   opts.set_xla_gpu_execution_progress_tracking(0);
 
@@ -491,6 +495,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
       DebugOptions::COLLECTIVES_PRIVATE_MEMORY);
   opts.set_xla_gpu_experimental_use_ragged_dot_grouped_gemm(true);
   opts.set_xla_gpu_native_emitter_tune_unroll_factor_for_loops(false);
+  opts.set_xla_gpu_experimental_use_ragged_dot_fusion(true);
 
   opts.set_xla_cpu_collective_call_warn_stuck_seconds(20);
   opts.set_xla_cpu_collective_call_terminate_timeout_seconds(40);
@@ -499,6 +504,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_keep_shardings_after_spmd(false);
   opts.set_xla_enable_hlo_sharding_v3(false);
   opts.set_xla_enable_rgv3_materialization(true);
+  opts.set_xla_sdy_export_all_reduce_scatter(false);
   opts.set_xla_gpu_experimental_enable_checksum_tracing_on_thunks(false);
   opts.set_xla_gpu_experimental_enable_buffer_saver_on_thunks(false);
 
@@ -1510,6 +1516,15 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       "debug_options "
       "are written to the --xla_dump_to dir, or, if no dir is specified, to "
       "stdout. Ignored unless xla_dump_hlo_as_text is true."));
+  flag_list->push_back(tsl::Flag(
+      "xla_hlo_print_inline_stack_frames",
+      bool_setter_for(&DebugOptions::set_xla_hlo_print_inline_stack_frames),
+      debug_options->xla_hlo_print_inline_stack_frames(),
+      "If true, when printing HLO text, resolve each instruction's "
+      "stack_frame_id into inline source_file/source_line/source_column "
+      "fields on its metadata, and append the StackFrameIndex resolution "
+      "tables (FileNames, FunctionNames, FileLocations, StackFrames) at "
+      "the end of the module text."));
   flag_list->push_back(
       tsl::Flag("xla_dump_large_constants",
                 bool_setter_for(&DebugOptions::set_xla_dump_large_constants),
@@ -1873,7 +1888,7 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       tsl::Flag("xla_gpu_enable_cublaslt",
                 bool_setter_for(&DebugOptions::set_xla_gpu_enable_cublaslt),
                 debug_options->xla_gpu_enable_cublaslt(),
-                "Use cuBLASLt for GEMMs when possible."));
+                "[Deprecated] Use cuBLASLt for GEMMs when possible."));
   flag_list->push_back(tsl::Flag(
       "xla_gpu_enable_command_buffer",
       SetterForRepeatedEnum<DebugOptions::CommandBufferCmdType>(
@@ -1944,6 +1959,15 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       debug_options->xla_gpu_enable_dynamic_slice_fusion(),
       "[Stable] Whether to enable address computation fusion to optimize "
       "dynamic-slice and dynamic-update-slice operations."));
+  flag_list->push_back(tsl::Flag(
+      "xla_gpu_experimental_dynamic_slice_fusion_verify_offsets",
+      bool_setter_for(
+          &DebugOptions::
+              set_xla_gpu_experimental_dynamic_slice_fusion_verify_offsets),
+      debug_options->xla_gpu_experimental_dynamic_slice_fusion_verify_offsets(),
+      "When true, DynamicSliceFusionV2Thunk verifies at runtime that "
+      "annotated DynamicSliceConfig offsets match actual XLA-computed "
+      "DS/DUS offsets. Adds D2H sync overhead — for debugging only."));
   flag_list->push_back(tsl::Flag(
       "xla_gpu_nccl_termination_timeout_seconds",
       int64_setter_for(
@@ -2652,18 +2676,32 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       debug_options->xla_gpu_executable_embed_debug_info(),
       "Add debug information to the executable such as HLO module, asm_text "
       "etc."));
+  flag_list->push_back(
+      tsl::Flag("xla_gpu_executable_num_compute_streams",
+                int32_setter_for(
+                    &DebugOptions::set_xla_gpu_executable_num_compute_streams),
+                debug_options->xla_gpu_executable_num_compute_streams(),
+                "Number of additional compute streams to allocate for a GPU "
+                "executable."));
   flag_list->push_back(tsl::Flag(
-      "xla_gpu_executable_warn_stuck_timeout",
+      "xla_gpu_executable_num_communication_streams",
       int32_setter_for(
-          &DebugOptions::set_xla_gpu_executable_warn_stuck_timeout_seconds),
-      debug_options->xla_gpu_executable_warn_stuck_timeout_seconds(),
-      "Set timeout for Rendezvous stuck warning"));
+          &DebugOptions::set_xla_gpu_executable_num_communication_streams),
+      debug_options->xla_gpu_executable_num_communication_streams(),
+      "Number of additional communication streams to allocate for a GPU "
+      "executable."));
   flag_list->push_back(tsl::Flag(
       "xla_gpu_executable_terminate_timeout",
       int32_setter_for(
           &DebugOptions::set_xla_gpu_executable_terminate_timeout_seconds),
       debug_options->xla_gpu_executable_terminate_timeout_seconds(),
       "Set timeout for Rendezvous termination"));
+  flag_list->push_back(tsl::Flag(
+      "xla_gpu_executable_warn_stuck_timeout",
+      int32_setter_for(
+          &DebugOptions::set_xla_gpu_executable_warn_stuck_timeout_seconds),
+      debug_options->xla_gpu_executable_warn_stuck_timeout_seconds(),
+      "Set timeout for Rendezvous stuck warning"));
 
   flag_list->push_back(tsl::Flag(
       "xla_gpu_execution_terminate_timeout",
@@ -3056,6 +3094,13 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       "If true, opportunistically materialize MeshAxesReplicaGroupList "
       "(RGV3) in SPMD partitioner. If false, fallback to legacy V1/V2 "
       "representations."));
+  flag_list->push_back(tsl::Flag(
+      "xla_sdy_export_all_reduce_scatter",
+      bool_setter_for(&DebugOptions::set_xla_sdy_export_all_reduce_scatter),
+      debug_options->xla_sdy_export_all_reduce_scatter(),
+      "Whether to export all sdy.reduce_scatter operations as native StableHLO "
+      "collectives wrapped in manual computation blocks. If false (default), "
+      "only operations with unreduced axes are exported this way."));
   flag_list->push_back(tsl::Flag(
       "xla_gpu_experimental_enable_checksum_tracing_on_thunks",
       bool_setter_for(

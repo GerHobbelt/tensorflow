@@ -28,6 +28,7 @@ limitations under the License.
 #include "absl/memory/memory.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
+#include "xla/tsl/platform/status_macros.h"
 #include "mlir/IR/MLIRContext.h"
 #include "xla/backends/autotuner/autotuner.h"
 #include "xla/backends/autotuner/autotuner_cache_interface.h"
@@ -140,7 +141,6 @@ bool ShouldAutotuneGemmFusion(const HloInstruction& instruction) {
 }
 
 bool ShouldAutotunGenericFusion(bool enable_fusion_autotuner,
-                                bool all_fusions_with_triton,
                                 const HloInstruction& instruction) {
   if (!enable_fusion_autotuner) {
     return false;
@@ -153,23 +153,27 @@ bool ShouldAutotunGenericFusion(bool enable_fusion_autotuner,
                      HloPredicateIsOp<HloOpcode::kScatter>)) {
     return false;
   }
-  if (all_fusions_with_triton) {
-    return true;
-  }
-  return absl::c_any_of(
-      fusion->fused_instructions_computation()->instructions(),
-      HloPredicateIsOp<HloOpcode::kReduce, HloOpcode::kTranspose>);
+  return true;
 }
 
 bool ShouldAutotuneInstruction(bool do_not_autotune_cublas,
                                bool do_not_autotune_cudnn,
                                bool enable_fusion_autotuner,
-                               bool all_fusions_with_triton,
                                bool has_native_or_ble_backends,
                                bool autotune_post_fusion,
                                const HloInstruction& instruction) {
   // 1. Custom calls.
   if (instruction.opcode() == HloOpcode::kCustomCall) {
+    // TODO(b/511979384): Remove this condition once
+    // xla_gpu_experimental_autotune_post_fusion is enabled by default.
+    // This guard-rail is necessary in the legacy 2-autotuner-pass system
+    // because in cases where we have ALG_DOT_BF16_BF16_F32_X3 or _X6,
+    // GetCublasRewriterPipeline will split these into mutliple dots. When the
+    // fission backend tries to find the dot, it finds multiple ones. It only
+    // picks the first one and returns the rest to the graph, untuned.
+    if (!autotune_post_fusion && has_native_or_ble_backends) {
+      return false;  // Skip custom calls in generic fusion tuning pass.
+    }
     return ShouldAutotuneCustomCall(do_not_autotune_cublas,
                                     do_not_autotune_cudnn, instruction);
   }
@@ -184,6 +188,11 @@ bool ShouldAutotuneInstruction(bool do_not_autotune_cublas,
     if (backend_config.kind() == kTritonGemmFusionKind ||
         backend_config.kind() == kCuDnnFusionKind ||
         backend_config.kind() == kCustomFusionKind) {
+      // TODO(b/511979384): Remove this condition once
+      // xla_gpu_experimental_autotune_post_fusion is enabled by default.
+      if (!autotune_post_fusion && has_native_or_ble_backends) {
+        return false;  // Skip GEMM fusions in generic fusion tuning pass.
+      }
       return ShouldAutotuneGemmFusion(instruction);
     }
     // 3. Generic fusions.
@@ -196,8 +205,7 @@ bool ShouldAutotuneInstruction(bool do_not_autotune_cublas,
     if (!autotune_post_fusion && !has_native_or_ble_backends) {
       return false;
     }
-    return ShouldAutotunGenericFusion(enable_fusion_autotuner,
-                                      all_fusions_with_triton, instruction);
+    return ShouldAutotunGenericFusion(enable_fusion_autotuner, instruction);
   }
   return false;
 }
@@ -283,27 +291,11 @@ AutotunerPass::GetGpuAutotunerBackends(
 
   std::vector<autotuner::Backend> disabled_autotune_backends;
   if (debug_options.xla_gpu_experimental_disable_binary_libraries()) {
-    disabled_autotune_backends.push_back(autotuner::Backend::CUBLAS);
     disabled_autotune_backends.push_back(autotuner::Backend::CUBLASLT);
     disabled_autotune_backends.push_back(autotuner::Backend::CUDNN);
-    disabled_autotune_backends.push_back(autotuner::Backend::ROCBLAS);
     disabled_autotune_backends.push_back(autotuner::Backend::HIPBLASLT);
     disabled_autotune_backends.push_back(autotuner::Backend::MIOPEN);
-    disabled_autotune_backends.push_back(autotuner::Backend::ROCBLAS_FISSION);
     disabled_autotune_backends.push_back(autotuner::Backend::HIPBLASLT_FISSION);
-  }
-
-  if (!debug_options.xla_gpu_enable_cublaslt()) {
-    disabled_autotune_backends.push_back(autotuner::Backend::CUBLASLT);
-    disabled_autotune_backends.push_back(autotuner::Backend::CUBLASLT_FISSION);
-    // NOTE(ROCm): Do not disable hipblaslt backends even with
-    // xla_gpu_enable_cublaslt=false since we need them for fp8
-  } else {
-    // Breaks xla/backends/gpu/transforms:gemm_rewriter_test_b200, it requires
-    // CUBLAS and CUBLASLT both to be available. TODO: fix tests and uncomment.
-    // disabled_autotune_backends.push_back(autotuner::Backend::CUBLAS);
-    disabled_autotune_backends.push_back(autotuner::Backend::CUBLAS_FISSION);
-    disabled_autotune_backends.push_back(autotuner::Backend::ROCBLAS_FISSION);
   }
 
   if (!debug_options.xla_gpu_experimental_autotune_post_fusion() ||
@@ -360,8 +352,6 @@ absl::StatusOr<std::unique_ptr<AutotunerPass>> AutotunerPass::Create(
       debug_options.xla_gpu_autotune_level() != 0 &&
       !debug_options.xla_gpu_exclude_nondeterministic_ops() &&
       debug_options.xla_gpu_experimental_enable_fusion_autotuner();
-  bool all_fusions_with_triton =
-      debug_options.xla_gpu_experimental_all_fusions_with_triton();
 
   bool has_native_or_ble_backends = absl::c_any_of(backends, [](const auto& b) {
     return b->name() == "NATIVE_EMITTER" || b->name() == "BLOCK_LEVEL_EMITTER";
@@ -371,12 +361,11 @@ absl::StatusOr<std::unique_ptr<AutotunerPass>> AutotunerPass::Create(
 
   auto should_autotune =
       [do_not_autotune_cublas, do_not_autotune_cudnn, enable_fusion_autotuner,
-       all_fusions_with_triton, has_native_or_ble_backends,
+       has_native_or_ble_backends,
        autotune_post_fusion](const HloInstruction& instruction) -> bool {
     return ShouldAutotuneInstruction(
         do_not_autotune_cublas, do_not_autotune_cudnn, enable_fusion_autotuner,
-        all_fusions_with_triton, has_native_or_ble_backends,
-        autotune_post_fusion, instruction);
+        has_native_or_ble_backends, autotune_post_fusion, instruction);
   };
 
   std::unique_ptr<Profiler> profiler = nullptr;
@@ -406,7 +395,7 @@ absl::StatusOr<std::unique_ptr<AutotunerPass>> AutotunerPass::Create(
       cache_dir, debug_options.xla_gpu_experimental_autotune_cache_mode(),
       target_config->device_description);
 
-  TF_ASSIGN_OR_RETURN(
+  ASSIGN_OR_RETURN(
       std::unique_ptr<Autotuner> autotuner,
       Autotuner::Create(std::move(backends), std::move(profiler),
                         autotune_config, std::move(cache), thread_pool));
@@ -424,10 +413,10 @@ absl::StatusOr<bool> AutotunerPass::RunImpl(
   bool shard_autotuning =
       enable_sharding_ && key_value_store_.process_count > 1;
   if (shard_autotuning) {
-    TF_RETURN_IF_ERROR(
+    RETURN_IF_ERROR(
         autotuner_->Autotune(module, should_autotune_, key_value_store_));
   } else {
-    TF_RETURN_IF_ERROR(autotuner_->Autotune(module, should_autotune_));
+    RETURN_IF_ERROR(autotuner_->Autotune(module, should_autotune_));
   }
   VLOG(1) << "Autotuner cache stats: hits=" << autotuner_->GetCacheStats().hits
           << ", misses=" << autotuner_->GetCacheStats().misses;
