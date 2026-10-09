@@ -175,6 +175,7 @@ cc_library(
         "//xla/pjrt:host_memory_spaces",
         "//xla/pjrt:pjrt_device_description",
         "//xla/pjrt:pjrt_layout",
+        "//xla/pjrt/plugin/xla_cpu:cpu_topology_description",
         "//xla/python/ifrt",
         "//xla/python/ifrt:attribute_map",
         "//xla/python/ifrt:basic_device_list",
@@ -203,7 +204,6 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
-        "@llvm-project//llvm:Support",
         "@tsl//tsl/platform:casts",
         "@tsl//tsl/profiler/lib:traceme",
     ],
@@ -259,7 +259,6 @@ cc_library(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
-        "@llvm-project//llvm:Support",
     ],
 )
 
@@ -299,7 +298,6 @@ cc_library(
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
         "@com_google_protobuf//:protobuf_lite",
-        "@llvm-project//llvm:Support",
         "@tsl//tsl/profiler/lib:traceme",
     ],
 )
@@ -396,7 +394,6 @@ cc_library(
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
-        "@llvm-project//llvm:Support",
         "@tsl//tsl/profiler/lib:traceme",
     ],
 )
@@ -430,7 +427,6 @@ ifrt_proxy_cc_test(
         "@com_google_absl//absl/time",
         "@com_google_googletest//:gtest_main",
         "@com_google_protobuf//:protobuf",
-        "@llvm-project//llvm:Support",
         "@tsl//tsl/platform:protobuf",
     ],
 )
@@ -614,7 +610,6 @@ cc_library(
         "//xla/python/ifrt",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/types:span",
-        "@llvm-project//llvm:Support",
     ],
 )
 
@@ -653,7 +648,6 @@ ifrt_proxy_cc_test(
         "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest_main",
         "@com_google_protobuf//:protobuf",
-        "@llvm-project//llvm:Support",
         "@tsl//tsl/platform",
         "@tsl//tsl/platform:protobuf",
     ],
@@ -718,7 +712,6 @@ cc_library(
         "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
-        "@llvm-project//llvm:Support",
         "@tsl//tsl/profiler/lib:traceme",
     ],
 )
