@@ -881,6 +881,8 @@ cc_library(
     hdrs = ["fused_eigen_output_kernels.h"],
     deps = [
         "//tensorflow/core:framework",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
         "@eigen_archive//:eigen3",
     ],
@@ -5601,6 +5603,23 @@ tf_kernel_library(
     deps = SPARSE_DEPS,
 )
 
+tf_cc_test(
+    name = "sparse_tensors_map_ops_test",
+    size = "small",
+    srcs = ["sparse_tensors_map_ops_test.cc"],
+    deps = [
+        ":sparse_tensors_map_ops",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:protos_all_cc",
+        "//tensorflow/core:sparse_ops_op_lib",
+        "//tensorflow/core:test",
+        "//tensorflow/core:test_main",
+        "//tensorflow/core/public:version",
+        "@com_google_absl//absl/status",
+    ],
+)
+
 tf_cuda_cc_tests(
     name = "sparse2_tests",
     size = "small",
@@ -8349,6 +8368,7 @@ cc_library(
     ] + LOOSE_HEADER_VISIBILITY,
     deps = [
         "@com_google_absl//absl/container:inlined_vector",
+        "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:string_view",

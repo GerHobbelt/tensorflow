@@ -250,16 +250,22 @@ class AudioProcessor(object):
           # member names and link targets: then every file, symlink and hard
           # link stays inside dest_directory.
           def _is_unsafe(path):
-            return (os.path.isabs(path) or bool(os.path.splitdrive(path)[0])
-                    or '..' in re.split(r'[\\/]', path))
+            return (
+                os.path.isabs(path)
+                or bool(os.path.splitdrive(path)[0])
+                or '..' in re.split(r'[\\/]', path)
+            )
 
           for member in archive.getmembers():
             if _is_unsafe(member.name) or (
-                (member.issym() or member.islnk()) and
-                _is_unsafe(member.linkname)):
+                (member.issym() or member.islnk())
+                and _is_unsafe(member.linkname)
+            ):
               raise ValueError(
                   'Refusing to extract unsafe archive member: {0}'.format(
-                      member.name))
+                      member.name
+                  )
+              )
           archive.extractall(dest_directory)
 
   def prepare_data_index(self, silence_percentage, unknown_percentage,

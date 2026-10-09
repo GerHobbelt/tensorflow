@@ -85,11 +85,9 @@ class CommonPjRtClient : public PjRtClient {
   virtual bool dump_on_deserialize() const { return false; }
   virtual bool should_stage_host_to_device_transfers() const { return false; }
   // Returns true if we should skip the staging buffer during ToLiteral.
-  virtual bool ShouldDoDirectTransfer(const MutableLiteralBase& literal,
-                                      const Shape& shape,
-                                      PjRtMemorySpace* memory_space) const {
-    return false;
-  }
+  bool ShouldDoDirectTransfer(const MutableLiteralBase& literal,
+                              const Shape& shape,
+                              PjRtMemorySpace* memory_space) const;
 
   tsl::AsyncValueRef<PjRtStagingBuffer> AllocateForDelinearizationAsync(
       size_t size, PjRtMemorySpace* memory_space);
@@ -637,6 +635,8 @@ class CommonPjRtLoadedExecutable : public PjRtLoadedExecutable {
         executable_(std::move(executable)),
         load_state_(std::move(load_state)) {}
 
+  ~CommonPjRtLoadedExecutable() override { Delete(); }
+
   CommonPjRtClient* client() const override { return client_; }
 
   absl::Span<PjRtDevice* const> addressable_devices() const override {
@@ -835,6 +835,9 @@ class CommonPjRtLoadedExecutable : public PjRtLoadedExecutable {
   absl::Span<int const> ParametersThatMayBeDonated() const;
 
   virtual const HloInputOutputAliasConfig& input_output_alias_config() const {
+    if (extras_) {
+      return extras_->input_output_alias_config;
+    }
     auto hlo_module = GetExecutable()->GetHloModule();
     CHECK_OK(hlo_module.status());
     return (*hlo_module)->input_output_alias_config();

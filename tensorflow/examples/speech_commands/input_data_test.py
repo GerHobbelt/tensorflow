@@ -21,7 +21,6 @@ import tarfile
 import numpy as np
 import tensorflow as tf
 
-
 from tensorflow.examples.speech_commands import input_data
 from tensorflow.examples.speech_commands import models
 from tensorflow.python.framework import test_util
@@ -84,23 +83,25 @@ class InputDataTest(test.TestCase):
 
   def testExtractRejectsMemberEscapingDestination(self):
     tmp_dir = self.get_temp_dir()
-    archive_path = os.path.join(tmp_dir, 'evil.tar.gz')
-    with tarfile.open(archive_path, 'w:gz') as archive:
-      info = tarfile.TarInfo('d')
+    archive_path = os.path.join(tmp_dir, "evil.tar.gz")
+    with tarfile.open(archive_path, "w:gz") as archive:
+      info = tarfile.TarInfo("d")
       info.type = tarfile.SYMTYPE
-      info.linkname = '.'
+      info.linkname = "."
       archive.addfile(info)
-      data = b'x'
-      info = tarfile.TarInfo('d/../escaped.txt')
+      data = b"x"
+      info = tarfile.TarInfo("d/../escaped.txt")
       info.size = len(data)
       archive.addfile(info, io.BytesIO(data))
-    dest_dir = os.path.join(tmp_dir, 'dest')
+    dest_dir = os.path.join(tmp_dir, "dest")
     with self.assertRaisesRegex(
         (ValueError, tarfile.TarError),
-        r'unsafe archive member|outside the destination'):
+        r"unsafe archive member|outside the destination",
+    ):
       input_data.AudioProcessor.maybe_download_and_extract_dataset(
-          None, 'file://' + archive_path, dest_dir)
-    self.assertFalse(os.path.exists(os.path.join(tmp_dir, 'escaped.txt')))
+          None, "file://" + archive_path, dest_dir
+      )
+    self.assertFalse(os.path.exists(os.path.join(tmp_dir, "escaped.txt")))
 
   def testPrepareWordsList(self):
     words_list = ["a", "b"]
