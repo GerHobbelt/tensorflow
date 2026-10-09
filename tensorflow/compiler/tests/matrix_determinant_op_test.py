@@ -44,7 +44,8 @@ class DeterminantOpTest(xla_test.XLATestCase):
         det = linalg_ops.matrix_determinant(p)
         sign, log_abs = gen_linalg_ops.log_matrix_determinant(p)
       det_out, sign_out, log_abs_out = sess.run(
-          [det, sign, log_abs], feed_dict={p: y})
+          [det, sign, log_abs], feed_dict={p: y}
+      )
 
     self.assertAllClose(np_det, det_out, rtol=1e-3, atol=1e-3)
     self.assertShapeEqual(np_det, det)
@@ -66,12 +67,14 @@ class DeterminantOpTest(xla_test.XLATestCase):
           np.where(non_singular, sign_out, 0),
           np.where(non_singular, np_sign, 0),
           rtol=1e-3,
-          atol=1e-3)
+          atol=1e-3,
+      )
       self.assertAllClose(
           np.where(non_singular, log_abs_out, 0),
           np.where(non_singular, np_log_abs, 0),
           rtol=1e-3,
-          atol=1e-3)
+          atol=1e-3,
+      )
 
   def _verifyDeterminantReal(self, x):
     for np_type in self.float_types & {np.float32, np.float64}:
@@ -79,33 +82,40 @@ class DeterminantOpTest(xla_test.XLATestCase):
 
   def testBasic(self):
     # 1x1
-    self._verifyDeterminantReal(np.array([[7.]]))
+    self._verifyDeterminantReal(np.array([[7.0]]))
     # 2x2 with negative determinant: det([[1, 2], [3, 4]]) == -2.
     # This is the case xla::LogDet() gets wrong (returns NaN).
-    self._verifyDeterminantReal(np.array([[1., 2.], [3., 4.]]))
+    self._verifyDeterminantReal(np.array([[1.0, 2.0], [3.0, 4.0]]))
     # 2x2 with positive determinant (the motivating jit_compile example).
-    self._verifyDeterminantReal(np.array([[4., 7.], [2., 6.]]))
+    self._verifyDeterminantReal(np.array([[4.0, 7.0], [2.0, 6.0]]))
     # Rank-deficient but not all-zero. An all-zero matrix hits division by
     # zero in Householder QR on TPU (SLogDet returns NaN instead of 0).
-    self._verifyDeterminantReal(np.array([[1., 2.], [2., 4.]]))
+    self._verifyDeterminantReal(np.array([[1.0, 2.0], [2.0, 4.0]]))
     # 3x3 with negative determinant.
     self._verifyDeterminantReal(
-        np.array([[1., 0., 0.], [0., 1., 0.], [0., 0., -1.]]))
+        np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]])
+    )
     # Well-conditioned 5x5 triangular matrix; det = 2*3*4*5*6 = 720.
     self._verifyDeterminantReal(
-        np.array([[2., 0., 0., 0., 0.], [1., 3., 0., 0., 0.],
-                  [0., 1., 4., 0., 0.], [0., 0., 1., 5., 0.],
-                  [0., 0., 0., 1., 6.]]))
+        np.array([
+            [2.0, 0.0, 0.0, 0.0, 0.0],
+            [1.0, 3.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 4.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 5.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0, 6.0],
+        ])
+    )
 
   def testBatch(self):
     # Mixed signs in the batch: dets are -2 and 3.
     self._verifyDeterminantReal(
-        np.array([[[1., 2.], [3., 4.]], [[2., 1.], [1., 2.]]]))
-    matrix1 = np.array([[1., 2.], [3., 4.]])
-    matrix2 = np.array([[1., 3.], [3., 5.]])
+        np.array([[[1.0, 2.0], [3.0, 4.0]], [[2.0, 1.0], [1.0, 2.0]]])
+    )
+    matrix1 = np.array([[1.0, 2.0], [3.0, 4.0]])
+    matrix2 = np.array([[1.0, 3.0], [3.0, 5.0]])
     batch = np.concatenate(
-        [np.expand_dims(matrix1, 0),
-         np.expand_dims(matrix2, 0)])
+        [np.expand_dims(matrix1, 0), np.expand_dims(matrix2, 0)]
+    )
     batch = np.tile(batch, [2, 3, 1, 1])
     self._verifyDeterminantReal(batch)
 
