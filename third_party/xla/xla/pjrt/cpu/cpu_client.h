@@ -90,6 +90,8 @@ class PjRtCpuClient final : public CommonPjRtClient {
   // This is needed because CPU currently doesn't have per-device dispatching
   // threads for Execute() so two-phase launch can run into thread starvation.
   bool supports_two_phase_launch() const override { return false; }
+  // TODO(parkers): implement proper predetermined error support.
+  bool supports_predetermined_error() const override { return false; }
 
   int process_index() const override { return process_index_; }
 
@@ -237,14 +239,6 @@ class PjRtCpuClient final : public CommonPjRtClient {
 
   std::unique_ptr<PjRtDeviceEventSet> CreateDeviceEventSet(
       size_t preallocated_size) const override;
-
-  using CommonPjRtClient::DefineBuffer;
-
-  absl::StatusOr<std::unique_ptr<PjRtBuffer>> DefineBuffer(
-      std::shared_ptr<const Shape> on_device_shape,
-      PjRtMemorySpace* memory_space, PjRtRawBufferRef raw_buffer,
-      absl::InlinedVector<PjRtDeviceEventRef, 2> definition_device_events)
-      override;
 
   using CommonPjRtClient::GetOnDeviceBytesCount;
   absl::StatusOr<int64_t> GetOnDeviceBytesCount(
@@ -545,12 +539,6 @@ class PjRtCpuLoadedExecutable final : public CommonPjRtLoadedExecutable {
   friend class CpuPjRtRawLoadedExecutable;
 
   absl::Status SetUpDonation(bool tuple_inputs);
-
-  // Checks that the input buffers passed in by the user have the correct size
-  // on device for the compiled program.
-  absl::Status CheckBufferCompatibilities(
-      absl::Span<const CommonPjRtBuffer::ScopedHold> input_buffers,
-      absl::Span<PjRtBuffer* const> argument_handles) const;
 
   absl::StatusOr<std::unique_ptr<PjRtRawLoadedExecutable>> LoadRawExecutable(
       const ExecuteOptions& options, size_t host_callback_idx,

@@ -38,8 +38,8 @@ class PjRtStreamExecutorDeviceEventPromise : public PjRtDeviceEventPromise {
                                        LocalDeviceState* local_device,
                                        AsyncWorkRunner* async_work_runner);
 
-  tsl::AsyncValue* async_value() const override {
-    return event_.GetAsyncValue();
+  PjRtDeviceEventPtr event() const override {
+    return PjRtDeviceEventPtr(event_.AsPtr());
   }
 
   void Set(PjRtDeviceEventRef event) override;
@@ -53,9 +53,6 @@ class PjRtStreamExecutorDeviceEventPromise : public PjRtDeviceEventPromise {
 
   void SetReady() override;
 
-  const tsl::AsyncValueRef<BufferSequencingEvent>& event() const {
-    return event_;
-  }
 
   tsl::RCReference<tsl::IndirectAsyncValue>& av() { return av_; }
 
@@ -78,6 +75,8 @@ class PjRtStreamExecutorDeviceEventSet : public PjRtDeviceEventSet {
   void AppendTo(
       std::vector<tsl::RCReference<tsl::AsyncValue>>& events) override;
   void AppendTo(PjRtDeviceEventSet& events) override;
+
+  std::unique_ptr<PjRtDeviceEventSet> Clone() const override;
 
   const absl::flat_hash_set<BufferSequencingEvent*>& events() const {
     return events_;
@@ -156,6 +155,19 @@ class PjRtStreamExecutorRawBuffer : public CommonPjRtRawBufferImpl {
       tsl::RCReference<PjRtDeviceEventPromise> definition_event_promise,
       tsl::RCReference<PjRtDeviceEventPromise> src_usage_event_promise,
       ::tsl::AsyncValueRef<bool> allocation_event) override;
+  tsl::AsyncValue* GetRawBufferAsyncValue() override {
+    return device_buffer_.GetAsyncValue();
+  }
+
+  absl::StatusOr<PjRtDeviceEventRef> CopyRawToRemoteDevice(
+      Future<std::string> serialized_descriptor, RemoteSendCallback on_done,
+      std::vector<tsl::RCReference<tsl::AsyncValue>> transfer_dependency_avs)
+      override;
+
+  void DecrefAfter(
+      std::vector<tsl::RCReference<tsl::AsyncValue>> avs) override {
+    DropRef();
+  }
 
  private:
   PjRtStreamExecutorClient* client_;

@@ -85,7 +85,6 @@ cc_library(
         "//xla/core/collectives:communicator",
         "//xla/core/collectives:rank_id",
         "//xla/hlo/builder:xla_computation",
-        "//xla/pjrt:abstract_tracked_device_buffer",
         "//xla/pjrt:async_work_runner",
         "//xla/pjrt:common_pjrt_client",
         "//xla/pjrt:device_event",
@@ -366,6 +365,11 @@ xla_test(
         ],
         # See b/491475964 for details.
         "gb200": [
+            "multi_gpu",
+            "broken",
+        ],
+        # See b/491475964 for details.
+        "gb300": [
             "multi_gpu",
             "broken",
         ],
