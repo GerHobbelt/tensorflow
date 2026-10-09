@@ -590,11 +590,33 @@ def _resolve_xla_einsum_ellipsis(equation, input0_shape, input1_shape):
   (see https://github.com/tensorflow/tensorflow/issues/122274). Replacing '...'
   with explicit axis labels allows XLA to apply its standard matmul lowering.
 
-  Returns the equation with '...' replaced by concrete labels, or the original
-  equation unchanged if no ellipsis is present or shapes are not static.
+  Handles broadcasting cases by aligning ellipsis dimensions from the right
+  (standard NumPy broadcasting rules). Strips whitespace from the equation
+  before processing to avoid incorrect label counts.
+
+  Args:
+    equation: A string representing the einsum equation, possibly containing
+      '...' to denote one or more batch dimensions. Whitespace in the string is
+      stripped before processing when an ellipsis is present.
+    input0_shape: A list of ints giving the shape of the first operand, or None
+      if the rank is not statically known.
+    input1_shape: A list of ints giving the shape of the second operand, or None
+      if the rank is not statically known.
+
+  Returns:
+    The equation string with every '...' replaced by concrete single-character
+    labels chosen from unused letters. Broadcasting is handled by
+    right-aligning the batch labels across operands. Returns the original
+    equation unchanged when no ellipsis is present, when either rank is
+    unknown, when the inputs appear malformed, or when there are not enough
+    unused letters to cover all batch dimensions.
   """
   if '...' not in equation:
     return equation
+
+  # Remove spaces to ensure correct length calculations
+  # (e.g. '...ab, bc->...ac').
+  equation = equation.replace(' ', '')
 
   inputs_str, output = equation.split('->')
   left, right = inputs_str.split(',')
@@ -615,6 +637,12 @@ def _resolve_xla_einsum_ellipsis(equation, input0_shape, input1_shape):
 
   batch0 = rank0 - len(left_explicit)
   batch1 = rank1 - len(right_explicit)
+
+  # If either operand's rank is less than its explicit label count, the
+  # equation/shape is malformed; fall back to the original equation.
+  if batch0 < 0 or batch1 < 0:
+    return equation
+
   # The ellipsis covers the maximum batch dims across operands (broadcasting).
   batch_ndims = max(batch0, batch1)
 
@@ -622,17 +650,26 @@ def _resolve_xla_einsum_ellipsis(equation, input0_shape, input1_shape):
     # No actual batch dims: simply strip the ellipsis.
     return '{},{}->{}'.format(left_explicit, right_explicit, output_explicit)
 
-  # Pick fresh single-char labels for the batch dims. Use letters
-  # that do not already appear in the equation.
+  # Pick fresh single-char labels for the batch dims. Use letters (both lower
+  # and upper case) that do not already appear in the equation. Including
+  # uppercase letters prevents running out of labels for equations with many
+  # existing lowercase labels.
   used = set(left_explicit + right_explicit + output_explicit)
-  available = [c for c in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ' if c not in used]
+  all_labels = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
+  available = [c for c in all_labels if c not in used]
   if len(available) < batch_ndims:
     # Not enough fresh labels; fall back to the original equation.
     return equation
 
   batch_labels = ''.join(available[:batch_ndims])
-  resolved_left = left.replace('...', batch_labels)
-  resolved_right = right.replace('...', batch_labels)
+
+  # Align broadcasting from the right (standard broadcasting rules).
+  # An operand with fewer batch dims gets a suffix of the full batch_labels.
+  left_labels = batch_labels[-batch0:] if batch0 > 0 else ''
+  right_labels = batch_labels[-batch1:] if batch1 > 0 else ''
+
+  resolved_left = left.replace('...', left_labels)
+  resolved_right = right.replace('...', right_labels)
   resolved_output = output.replace('...', batch_labels)
   return '{},{}->{}'.format(resolved_left, resolved_right, resolved_output)
 
@@ -647,10 +684,13 @@ def _einsum_grad(op, grad):
   # the gradient xla_einsum ops get concrete equations that XLA can lower to
   # efficient DOT/matmul kernels (fixes register-spill regression, #122274).
   if '...' in equation:
-    input0_shape = op.inputs[0].shape.as_list() if op.inputs[0].shape else None
-    input1_shape = op.inputs[1].shape.as_list() if op.inputs[1].shape else None
-    equation = _resolve_xla_einsum_ellipsis(equation, input0_shape,
-                                            input1_shape)
+    shape0 = op.inputs[0].shape
+    shape1 = op.inputs[1].shape
+    input0_shape = shape0.as_list() if shape0.ndims is not None else None
+    input1_shape = shape1.as_list() if shape1.ndims is not None else None
+    equation = _resolve_xla_einsum_ellipsis(
+        equation, input0_shape, input1_shape
+    )
 
   inputs, output = equation.split('->')
   left, right = inputs.split(',')
