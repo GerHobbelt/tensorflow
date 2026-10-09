@@ -13,18 +13,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include <memory>
-
-#include "absl/strings/string_view.h"
-#include "riegeli/bytes/file_writer.h"
-#include "riegeli/bytes/writer.h"
-#include "xla/service/riegeli_file_writer_factory.h"
+#include "xla/python/pjrt_ifrt/tpu_xla_executable_abi_version.h"
 
 namespace xla {
 
-std::unique_ptr<riegeli::Writer> CreateRiegeliFileWriter(
-    absl::string_view filename) {
-  return std::make_unique<riegeli::FileWriter<>>(filename);
-}
+[[maybe_unused]] char TpuXlaExecutableAbiVersion::ID = 0;
 
 }  // namespace xla

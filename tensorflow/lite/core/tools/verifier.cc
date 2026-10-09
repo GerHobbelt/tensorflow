@@ -442,6 +442,7 @@ bool VerifyNumericTensorBuffer(const Tensor& tensor, const Buffer& buffer,
       break;
     case TensorType_FLOAT8_E4M3FN:
     case TensorType_FLOAT8_E5M2:
+    case TensorType_FLOAT8_E8M0FNU:
       bytes_required *= sizeof(uint8_t);
       break;
     case TensorType_INT8:
@@ -526,10 +527,11 @@ bool VerifyOperators(const Vector<Offset<Operator>>& operators, size_t len,
 }
 
 bool IsConstantTensor(const Tensor& tensor, const Model& model) {
+  if (tensor.external_buffer() > 0) return true;
   if (!tensor.buffer() || !model.buffers()) return false;
   if (tensor.buffer() > 0 && tensor.buffer() < model.buffers()->size()) {
     auto* buffer = model.buffers()->Get(tensor.buffer());
-    if (buffer && buffer->data()) {
+    if (buffer && (buffer->data() || buffer->offset() > 1)) {
       return true;
     }
   }

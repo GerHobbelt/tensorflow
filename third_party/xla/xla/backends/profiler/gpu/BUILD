@@ -139,7 +139,6 @@ cc_library(
     tags = [
         "cuda-only",
         "gpu",
-        "requires-gpu-nvidia",
     ],
     deps = [
         "@com_google_absl//absl/base:no_destructor",
@@ -158,7 +157,7 @@ xla_cc_test(
         "gpu",
         "no_mac",
         "nomsan",  # Disable  msan for cuda related tests.
-        "requires-gpu-nvidia",
+        "requires-gpu-sm90",
     ],
     deps = [
         ":cuda_version_variants",
@@ -301,6 +300,7 @@ xla_test(
         "@local_config_cuda//cuda:cuda_headers",
         "@local_config_cuda//cuda:cupti_headers",
         "@tsl//tsl/profiler/lib:scoped_annotation",
+        "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
     ],
 )
 
@@ -963,6 +963,7 @@ xla_test(
         "h100",
         "b200",
     ],
+    shard_count = 3,
     tags = [
         "cuda-only",
         "no_mac",

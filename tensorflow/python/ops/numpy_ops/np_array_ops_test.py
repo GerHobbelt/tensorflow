@@ -230,6 +230,13 @@ class ArrayCreationTest(test.TestCase):
                 np_array_ops.eye(n, m, k, dtype=dtype),
                 np.eye(n, m, k, dtype=dtype))
 
+    # Test M=0 and N=0 zero-dimension edge cases
+    for n in (0, 1, 3):
+      for m in (0, 1, 3):
+        self.match(np_array_ops.eye(n, m), np.eye(n, m))
+        for k in range(-n - 1, m + 2):
+          self.match(np_array_ops.eye(n, m, k), np.eye(n, m, k))
+
   def testIdentity(self):
     n_max = 3
 
@@ -1191,6 +1198,8 @@ class ArrayMethodsTest(test.TestCase):
     self.assertAllEqual(out, out_expected)
 
   def testTakeAlongAxisJitCompile(self):
+    if test_util.is_xla_enabled():
+      self.skipTest("Not supported when compiled with XLA.")
     # Regression test for GitHub issue 62391: the axis-swapping branch was
     # emitted as a real conditional whose branches have different shapes, so
     # the result shape XLA computed disagreed with the shape set on the
@@ -1211,6 +1220,8 @@ class ArrayMethodsTest(test.TestCase):
     self.assertAllClose(expected, actual)
 
   def testTakeAlongAxisUnknownRank(self):
+    if test_util.is_xla_enabled():
+      self.skipTest("Not supported when compiled with XLA.")
     # The tensor predicate is still used when the rank is not known
     # statically.
     @def_function.function(
@@ -1390,6 +1401,11 @@ class ArrayMethodsTest(test.TestCase):
         else:
           arr = np.asarray(state.randn(*shape) * 100, dtype=dtype)
         self.match(np_array_ops.sign(arr), np.sign(arr))
+
+    with self.assertRaisesRegex(ValueError, "doesn't support setting out"):
+      np_array_ops.sign([1], out=[])
+    with self.assertRaisesRegex(ValueError, "doesn't support setting where"):
+      np_array_ops.sign([1], where=False)
 
 
 class ArrayManipulationTest(test.TestCase):

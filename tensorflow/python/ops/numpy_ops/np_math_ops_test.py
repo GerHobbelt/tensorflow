@@ -207,6 +207,30 @@ class MathTest(test.TestCase, parameterized.TestCase):
     expected = np.hypot(x, y)
     np.testing.assert_equal(actual.tolist(), expected.tolist())
 
+  def testLogaddexp(self):
+    self._testBinaryOp(np_math_ops.logaddexp, np.logaddexp, 'logaddexp')
+    self._testBinaryOp(np_math_ops.logaddexp2, np.logaddexp2, 'logaddexp2')
+
+  def testLogaddexpNonFloatInputs(self):
+    int_args = [
+        ([1, 2, 3], [4, 5, 6]),
+        (np.array([1, 2], dtype=np.int32), np.array([3, 4], dtype=np.int32)),
+        (np.array([1, 2], dtype=np.int64), np.array([3, 4], dtype=np.int64)),
+        (1, 2),
+        ([1.0, 2.0], [3.0, 4.0]),
+    ]
+    for x1, x2 in int_args:
+      self.match(
+          np_math_ops.logaddexp(x1, x2),
+          np.logaddexp(np.asarray(x1), np.asarray(x2)),
+          msg='logaddexp({}, {})'.format(x1, x2),
+      )
+      self.match(
+          np_math_ops.logaddexp2(x1, x2),
+          np.logaddexp2(np.asarray(x1), np.asarray(x2)),
+          msg='logaddexp2({}, {})'.format(x1, x2),
+      )
+
   def match(self, actual, expected, msg='', check_dtype=True):
     self.assertIsInstance(actual, np_arrays.ndarray)
     if check_dtype:
@@ -408,7 +432,11 @@ class MathTest(test.TestCase, parameterized.TestCase):
             tensor.TensorSpec([None, 2], np.float32),
         ],
     )
-    self.match(compiled_cross_2(a2, b2), np.cross(a2, b2), check_dtype=False)
+    try:
+      expected_2 = np.cross(a2, b2)
+    except ValueError:
+      expected_2 = a2[..., 0] * b2[..., 1] - a2[..., 1] * b2[..., 0]
+    self.match(compiled_cross_2(a2, b2), expected_2, check_dtype=False)
 
   def testCrossDynamicUnknownBatchDim(self):
     # A fully dynamic shape still works outside of jit compilation.
@@ -441,6 +469,18 @@ class MathTest(test.TestCase, parameterized.TestCase):
       np_math_ops.average(np.ones([2, 3]), axis=0, weights=np.ones([]))
     with self.assertRaisesWithPredicateMatch(errors.InvalidArgumentError, r''):
       np_math_ops.average(np.ones([2, 3]), axis=0, weights=np.ones([5]))
+
+  def testAverageZeroWeights(self):
+    # NumPy raises ZeroDivisionError when weights sum to zero.
+    x = np_array_ops.array([1, 2, 3])
+    with self.assertRaises(errors.InvalidArgumentError):
+      np_math_ops.average(x, weights=np_array_ops.array([0, 0, 0]))
+
+    x2 = np_array_ops.ones([2, 2])
+    with self.assertRaises(errors.InvalidArgumentError):
+      np_math_ops.average(
+          x2, axis=0, weights=np_array_ops.array([[0, 1], [0, 1]])
+      )
 
   def testClip(self):
 
@@ -644,6 +684,37 @@ class MathTest(test.TestCase, parameterized.TestCase):
     self.assertAllEqual(a1.flatten('C'), a2.flatten('K'))
     with self.assertRaises(ValueError):
       a2.flatten('invalid')
+
+  def testDiff(self):
+    a = np_array_ops.array([[1, 2, 3], [4, 6, 8]])
+    self.match(np_math_ops.diff(a), np.diff(a))
+    self.match(np_math_ops.diff(a, axis=0), np.diff(a, axis=0))
+    self.match(np_math_ops.diff(a, axis=-1), np.diff(a, axis=-1))
+    self.match(np_math_ops.diff(a, n=2, axis=1), np.diff(a, n=2, axis=1))
+    self.match(
+        np_math_ops.diff(np_array_ops.array([1, 3, 6], dtype=np.int32)),
+        np.diff(np.array([1, 3, 6], dtype=np.int32)),
+    )
+    self.match(
+        np_math_ops.diff(np_array_ops.array([True, False, True])),
+        np.diff(np.array([True, False, True])),
+    )
+    # Dtype and value parity for float inputs and n=0.
+    self.match(
+        np_math_ops.diff(np_array_ops.array([1.5, 2.5, 4.0], np.float32)),
+        np.diff(np.array([1.5, 2.5, 4.0], dtype=np.float32)),
+    )
+    self.match(
+        np_math_ops.diff(np_array_ops.array([1, 3, 6], dtype=np.int32), n=0),
+        np.diff(np.array([1, 3, 6], dtype=np.int32), n=0),
+    )
+    # NumPy raises ValueError for 0-d inputs too.
+    with self.assertRaisesRegex(ValueError, 'out of bounds'):
+      np_math_ops.diff(np_array_ops.array(5))
+    with self.assertRaisesRegex(ValueError, 'out of bounds'):
+      np_math_ops.diff(a, axis=2)
+    with self.assertRaisesRegex(ValueError, 'out of bounds'):
+      np_math_ops.diff(a, axis=-3)
 
   def testIsInf(self):
     x1 = ops.convert_to_tensor(-2147483648)
