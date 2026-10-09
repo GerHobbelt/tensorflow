@@ -108,6 +108,7 @@ limitations under the License.
 #include "xla/backends/gpu/runtime/triangular_solve_thunk.h"
 #include "xla/backends/gpu/runtime/while_thunk.h"
 #include "xla/backends/gpu/transforms/collectives/collective_ops_utils.h"
+#include "xla/backends/gpu/transforms/dynamic_slice_copy.h"
 #include "xla/backends/gpu/transforms/dynamic_slice_fusion.h"
 #include "xla/codegen/emitters/kernel_arguments.h"
 #include "xla/codegen/kernel_definition.h"
@@ -157,7 +158,6 @@ limitations under the License.
 #include "xla/service/hlo_creation_utils.h"
 #include "xla/service/llvm_ir/buffer_assignment_util.h"
 #include "xla/service/llvm_ir/llvm_command_line_options.h"
-#include "xla/service/pattern_matcher.h"
 #include "xla/service/shaped_slice.h"
 #include "xla/shape.h"
 #include "xla/shape_util.h"
@@ -177,8 +177,6 @@ limitations under the License.
 
 namespace xla::gpu {
 namespace {
-
-namespace m = ::xla::match;
 
 absl::StatusOr<TritonKernelSource> EmitTritonFrom(
     const TritonCall& call, const std::string& kernel_name,
@@ -229,7 +227,7 @@ static constexpr bool kRequiresCollectiveKernelThunk =
 // collective thunks such as AllReduceStart. So this function is only
 // responsible for emitting the collective kernel thunk and its dependencies.
 xla::Future<std::unique_ptr<CollectiveKernelThunk>> EmitCollectiveKernelThunk(
-    IrEmitterContext* ir_emitter_context, const CallGraph* call_graph,
+    IrEmitterContext* ir_emitter_context, const CallGraph& call_graph,
     Thunk::ThunkInfo thunk_info, std::vector<CollectiveThunk::Buffer> buffers,
     const HloAllReduceInstruction* instr, const AllReduceConfig& config,
     ThunkEmitter* compiler,
@@ -264,8 +262,8 @@ xla::Future<std::unique_ptr<CollectiveKernelThunk>> EmitCollectiveKernelThunk(
       [thunk_info = std::move(thunk_info), buffers = std::move(buffers), config,
        is_async = !IsGPUSyncCollective(*instr), is_collective_kernel_enabled](
           absl::string_view kernel_name, int32_t shmem_bytes,
-          std::optional<LaunchDimensions> launch_dimensions,
-          const std::vector<uint8_t>& cubin, bool use_pdl) {
+          LaunchDimensions launch_dimensions, const std::vector<uint8_t>& cubin,
+          bool use_pdl) {
         return std::make_unique<CollectiveKernelThunk>(
             thunk_info, config.config, config.reduction_kind, is_async,
             std::move(buffers), is_collective_kernel_enabled, kernel_name,
@@ -275,9 +273,11 @@ xla::Future<std::unique_ptr<CollectiveKernelThunk>> EmitCollectiveKernelThunk(
   ASSIGN_OR_RETURN(bool did_set_config, TrySetGpuBackendConfigForCollective(
                                             device_info, fusion_instr));
   if (!did_set_config) {
-    return make_thunk(/*kernel_name=*/"",
-                      /*shmem_bytes=*/0,
-                      /*launch_dimensions=*/std::nullopt, {}, false);
+    // TODO(b/522693539):
+    // Because of lack of topology information in the CollectiveKernelThunk,
+    // we cannot know during emission if we can use the collective kernel
+    // thunk or not.
+    return nullptr;
   }
   analysis_garbage_collector.push_back(
       std::make_unique<HloFusionAnalysis>(HloFusionAnalysis::Create(
@@ -319,6 +319,22 @@ ThunkSequence FlattenThunkSequence(std::vector<ThunkSequence>&& sequences) {
     AppendThunkSequence(result, seq);
   }
   return result;
+}
+
+absl::StatusOr<std::string> CanonicalGemmHlo(
+    const HloCustomCallInstruction* instr) {
+  ASSIGN_OR_RETURN(auto gpu_config, instr->backend_config<GpuBackendConfig>());
+
+  auto* gemm_config = gpu_config.has_grouped_gemm_backend_config()
+                          ? gpu_config.mutable_grouped_gemm_backend_config()
+                                ->mutable_gemm_backend_config()
+                          : gpu_config.mutable_gemm_backend_config();
+
+  // Clear algorithm-specific fields from the cache key
+  gemm_config->clear_selected_algorithm();
+  gemm_config->set_autotune_workspace_size(0);
+  return instr->ToString(HloPrintOptions::Fingerprint()) +
+         BackendConfigWrapper(gpu_config).GetRawString();
 }
 
 }  // namespace
@@ -568,8 +584,8 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitCublasLtMatmulThunk(
                    gpublas_lt::AsBlasLtEpilogue(epilogue));
   Thunk::ThunkInfo thunk_info = Thunk::ThunkInfo::WithProfileAnnotation(
       instr, ir_emitter_context_->GetNextThunkId());
-  std::string canonical_hlo = instr->ToString(
-      HloPrintOptions::Fingerprint().set_print_backend_config(true));
+
+  ASSIGN_OR_RETURN(std::string canonical_hlo, CanonicalGemmHlo(instr));
   auto thunk = std::make_unique<CublasLtMatmulThunk>(
       std::move(thunk_info), std::move(canonical_hlo), std::move(gemm_config),
       blas_lt_epilogue, algorithm, config.autotune_workspace_size(), a, b, c, d,
@@ -658,8 +674,7 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitCublasLtMatmulThunkF8(
                    gpublas_lt::AsBlasLtEpilogue(epilogue));
   Thunk::ThunkInfo thunk_info = Thunk::ThunkInfo::WithProfileAnnotation(
       instr, ir_emitter_context_->GetNextThunkId());
-  std::string canonical_hlo = instr->ToString(
-      HloPrintOptions::Fingerprint().set_print_backend_config(true));
+  ASSIGN_OR_RETURN(std::string canonical_hlo, CanonicalGemmHlo(instr));
   auto thunk = std::make_unique<CublasLtMatmulThunk>(
       std::move(thunk_info), std::move(canonical_hlo), std::move(gemm_config),
       blas_lt_epilogue, algorithm, config.autotune_workspace_size(), a, b, c, d,
@@ -734,8 +749,7 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitCublasLtGroupedMatmulThunk(
 
   Thunk::ThunkInfo thunk_info = Thunk::ThunkInfo::WithProfileAnnotation(
       instr, ir_emitter_context_->GetNextThunkId());
-  std::string canonical_hlo = instr->ToString(
-      HloPrintOptions::Fingerprint().set_print_backend_config(true));
+  ASSIGN_OR_RETURN(std::string canonical_hlo, CanonicalGemmHlo(instr));
 
   auto thunk = std::make_unique<CublasLtMatmulThunk>(
       std::move(thunk_info), std::move(canonical_hlo), std::move(gemm_config),
@@ -788,8 +802,7 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitCublasLtMatmulThunkMx(
                    gpublas_lt::AsBlasLtEpilogue(epilogue));
   Thunk::ThunkInfo thunk_info = Thunk::ThunkInfo::WithProfileAnnotation(
       instr, ir_emitter_context_->GetNextThunkId());
-  std::string canonical_hlo = instr->ToString(
-      HloPrintOptions::Fingerprint().set_print_backend_config(true));
+  ASSIGN_OR_RETURN(std::string canonical_hlo, CanonicalGemmHlo(instr));
   auto thunk = std::make_unique<CublasLtMatmulThunk>(
       std::move(thunk_info), std::move(canonical_hlo), std::move(gemm_config),
       blas_lt_epilogue, algorithm, config.autotune_workspace_size(), a, b, c, d,
@@ -1388,11 +1401,108 @@ AsyncThunkSequence ThunkEmitter::EmitAsyncComputation(
       });
 }
 
+AsyncThunkSequence ThunkEmitter::EmitDynamicSliceCopyFusion(
+    const HloFusionInstruction* instr, DynamicSliceCopyFusion copy) {
+  std::vector<BufferAllocation> embedded_allocations;
+  embedded_allocations.reserve(copy.parameters.size() + copy.results.size());
+
+  for (const auto& param : copy.parameters) {
+    embedded_allocations.emplace_back(embedded_allocations.size(),
+                                      ShapeUtil::ByteSizeOf(param.slice_shape),
+                                      0);
+  }
+
+  for (const auto& res : copy.results) {
+    embedded_allocations.emplace_back(embedded_allocations.size(),
+                                      ShapeUtil::ByteSizeOf(res.update_shape),
+                                      0);
+  }
+
+  TF_RET_CHECK(copy.parameters.size() == 1);
+  TF_RET_CHECK(copy.results.size() == 1);
+
+  const Shape& copy_shape = copy.copy_operand->shape();
+  int64_t byte_size = ShapeUtil::ByteSizeOf(copy_shape);
+  BufferAllocation::Slice src_slice(&embedded_allocations[0], 0, byte_size);
+  BufferAllocation::Slice dst_slice(
+      &embedded_allocations[copy.parameters.size()], 0, byte_size);
+
+  ThunkSequence embedded_thunks =
+      ThunkSequence::Of(std::make_unique<DeviceToDeviceCopyThunk>(
+          Thunk::ThunkInfo::WithProfileAnnotation(
+              instr, ir_emitter_context_->GetNextThunkId()),
+          ShapedSlice{src_slice, copy_shape},
+          ShapedSlice{dst_slice, copy.results[0].update_shape}, byte_size));
+
+  std::vector<BufferAllocation::Slice> parameter_buffers;
+  parameter_buffers.reserve(instr->operand_count());
+  for (const auto* operand : instr->operands()) {
+    ASSIGN_OR_RETURN(parameter_buffers.emplace_back(),
+                     GetAllocationSliceForHlo(operand));
+  }
+
+  std::vector<BufferAllocation::Slice> result_buffers;
+  RETURN_IF_ERROR(ShapeUtil::ForEachLeafShapeWithStatus(
+      instr->shape(),
+      [&](const Shape&, const ShapeIndex& index) -> absl::Status {
+        ASSIGN_OR_RETURN(result_buffers.emplace_back(),
+                         GetAllocationSliceForHlo(instr, index));
+        return absl::OkStatus();
+      }));
+
+  RETURN_IF_ERROR(DynamicSliceFusionV2Thunk::VerifyBufferAssignment(
+      copy.results, parameter_buffers, result_buffers));
+
+  Thunk::ThunkInfo thunk_info = Thunk::ThunkInfo::WithProfileAnnotation(
+      instr, ir_emitter_context_->GetNextThunkId());
+  bool verify_offsets =
+      ir_emitter_context_->debug_options()
+          .xla_gpu_experimental_dynamic_slice_fusion_verify_offsets();
+
+  return ThunkSequence::Of(std::make_unique<DynamicSliceFusionV2Thunk>(
+      std::move(thunk_info), std::move(copy.parameters),
+      std::move(copy.results), std::move(parameter_buffers),
+      std::move(result_buffers), std::move(embedded_allocations),
+      std::move(embedded_thunks), verify_offsets));
+}
+
+AsyncThunkSequence ThunkEmitter::EmitStaticSliceCopyFusion(
+    const HloFusionInstruction* instr, const StaticSliceCopyFusion& copy) {
+  if (copy.parameter_number < 0 ||
+      copy.parameter_number >= instr->operand_count()) {
+    return Internal("Static slice copy parameter %d is out of range for %s",
+                    copy.parameter_number, instr->ToString());
+  }
+
+  ASSIGN_OR_RETURN(
+      BufferAllocation::Slice arg_slice,
+      GetAllocationSliceForHlo(instr->operand(copy.parameter_number)));
+  ASSIGN_OR_RETURN(BufferAllocation::Slice dst_slice,
+                   GetAllocationSliceForHlo(instr));
+
+  int64_t byte_size = ShapeUtil::ByteSizeOf(copy.slice_shape);
+  BufferAllocation::Slice src_slice(
+      arg_slice.allocation(), arg_slice.offset() + copy.source_byte_offset,
+      byte_size, arg_slice.element_type());
+
+  return GetThunkSequence(std::make_unique<DeviceToDeviceCopyThunk>(
+      Thunk::ThunkInfo::WithProfileAnnotation(
+          instr, ir_emitter_context_->GetNextThunkId()),
+      ShapedSlice{src_slice, copy.slice_shape},
+      ShapedSlice{dst_slice, instr->shape()}, byte_size));
+}
+
 AsyncThunkSequence ThunkEmitter::EmitFusion(const HloFusionInstruction* instr) {
-  ASSIGN_OR_RETURN(std::optional<ThunkSequence> slice_thunks,
-                   TryEmitTrivialSliceFusion(instr));
-  if (slice_thunks.has_value()) {
-    return std::move(*slice_thunks);
+  ASSIGN_OR_RETURN(std::optional<StaticSliceCopyFusion> static_copy,
+                   AnalyzeStaticSliceCopyFusion(instr));
+  if (static_copy.has_value()) {
+    return EmitStaticSliceCopyFusion(instr, *static_copy);
+  }
+
+  ASSIGN_OR_RETURN(std::optional<DynamicSliceCopyFusion> dynamic_copy,
+                   AnalyzeDynamicSliceCopyFusion(instr));
+  if (dynamic_copy.has_value()) {
+    return EmitDynamicSliceCopyFusion(instr, std::move(*dynamic_copy));
   }
 
   analysis_garbage_collector_.push_back(
@@ -1415,55 +1525,6 @@ AsyncThunkSequence ThunkEmitter::EmitFusion(const HloFusionInstruction* instr) {
       HloFusionInfo(fusion_analysis, instr,
                     &ir_emitter_context_->buffer_assignment(), *call_graph_));
   return emitter->Emit(*ir_emitter_context_, *instr);
-}
-
-// Pattern match wrapped slice instruction that slices a contiguous buffer out
-// of the fusion parameter. Such trivial slices can be emitted as d2d copy.
-absl::StatusOr<std::optional<ThunkSequence>>
-ThunkEmitter::TryEmitTrivialSliceFusion(const HloFusionInstruction* instr) {
-  const HloInstruction* slice_instr = nullptr;
-  const HloInstruction* src = nullptr;
-
-  if (!Match(instr->fused_expression_root(),
-             m::Slice(&slice_instr, m::Parameter(&src, 0)))) {
-    return std::nullopt;
-  }
-  const HloSliceInstruction* slice = Cast<HloSliceInstruction>(slice_instr);
-
-  const Shape& src_shape = src->shape();
-  const Shape& dst_shape = instr->shape();
-  if (!Layout::Equal().MinorToMajorOnly()(src_shape.layout(),
-                                          dst_shape.layout()) ||
-      !IsContiguousSlice(*slice)) {
-    return std::nullopt;
-  }
-
-  auto byte_strides = ShapeUtil::ByteStrides(src_shape);
-  if (!byte_strides.has_value()) {
-    return std::nullopt;
-  }
-
-  int64_t src_byte_offset = 0;
-  for (int64_t dim = 0; dim < src_shape.dimensions().size(); ++dim) {
-    src_byte_offset += slice->slice_starts(dim) * (*byte_strides)[dim];
-  }
-
-  ASSIGN_OR_RETURN(BufferAllocation::Slice arg_slice,
-                   GetAllocationSliceForHlo(instr->operand(0)));
-  ASSIGN_OR_RETURN(BufferAllocation::Slice dst_slice,
-                   GetAllocationSliceForHlo(instr));
-
-  // Slice of the parameter buffer copied to the result buffer.
-  int64_t byte_size = ShapeUtil::ByteSizeOf(dst_shape);
-  BufferAllocation::Slice src_slice(arg_slice.allocation(),
-                                    arg_slice.offset() + src_byte_offset,
-                                    byte_size, arg_slice.element_type());
-
-  return GetThunkSequence(std::make_unique<DeviceToDeviceCopyThunk>(
-      Thunk::ThunkInfo::WithProfileAnnotation(
-          instr, ir_emitter_context_->GetNextThunkId()),
-      ShapedSlice{src_slice, dst_shape}, ShapedSlice{dst_slice, dst_shape},
-      byte_size));
 }
 
 AsyncThunkSequence ThunkEmitter::EmitDynamicSliceFusionV2(
@@ -1960,11 +2021,10 @@ AsyncThunkSequence ThunkEmitter::EmitCollectiveThunk(
   // lifted out of the all reduce thunk.
   if constexpr (kRequiresCollectiveKernelThunk<CollectiveThunkType>) {
     thunks =
-        EmitCollectiveKernelThunk(
-            ir_emitter_context_,
-            call_graph_.get(),  // NOLINT(readability-redundant-smartptr-get)
-            thunk_info, buffers, Cast<HloAllReduceInstruction>(inst),
-            GetAllReduceConfigInst(inst), this, analysis_garbage_collector_)
+        EmitCollectiveKernelThunk(ir_emitter_context_, *call_graph_, thunk_info,
+                                  buffers, Cast<HloAllReduceInstruction>(inst),
+                                  GetAllReduceConfigInst(inst), this,
+                                  analysis_garbage_collector_)
             .Map([thunk_info = std::move(thunk_info),
                   use_memcpy_local_p2p = ir_emitter_context_->debug_options()
                                              .xla_gpu_use_memcpy_local_p2p(),
@@ -2846,13 +2906,13 @@ AsyncThunkSequence ThunkEmitter::EmitHloInstruction(const HloInstruction* hlo,
   return Internal("Unhandled HLO instruction");
 }
 
-absl::StatusOr<std::unique_ptr<SequentialThunk>>
+xla::Future<std::unique_ptr<SequentialThunk>>
 ThunkEmitter::EmitHloEntryComputation(const HloModule* module) {
-  ASSIGN_OR_RETURN(
-      ThunkSequence thunks,
-      std::move(EmitHloComputation(module->entry_computation())).Await());
-  return std::make_unique<SequentialThunk>(Thunk::ThunkInfo{},
-                                           std::move(thunks));
+  return EmitHloComputation(module->entry_computation())
+      .Map([](ThunkSequence thunks) {
+        return std::make_unique<SequentialThunk>(Thunk::ThunkInfo{},
+                                                 std::move(thunks));
+      });
 }
 
 AsyncThunkSequence ThunkEmitter::EmitHloComputation(

@@ -367,6 +367,8 @@ filegroup(
         "variant_encode_decode.h",
         "variant_op_registry.h",
         "variant_tensor_data.h",
+        ":tensor_proto_cc",
+        ":tensor_shape_proto_cc",
         "@xla//xla/tsl/framework:device_type.h",
     ],
 )
@@ -1990,6 +1992,7 @@ tf_cc_test(
     deps = [
         "//tensorflow/core:framework",
         "//tensorflow/core/lib/monitoring:cell_reader",
+        "//tensorflow/core/lib/monitoring:test_utils",
         "@com_google_googletest//:gtest_main",
     ],
 )

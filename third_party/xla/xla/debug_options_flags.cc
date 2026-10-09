@@ -206,6 +206,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_dump_enable_mlir_pretty_form(true);
   opts.set_xla_dump_full_hlo_config(true);
   opts.set_xla_dump_buffer_assignment_analysis(true);
+  opts.set_xla_dump_compact_gte(false);
   opts.set_xla_debug_buffer_assignment_show_max(15);
   opts.set_xla_cpu_use_onednn(false);
   opts.set_xla_cpu_experimental_onednn_custom_call(false);
@@ -257,6 +258,8 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.add_xla_gpu_enable_command_buffer(DebugOptions::CUSTOM_CALL);
   opts.add_xla_gpu_enable_command_buffer(DebugOptions::DYNAMIC_SLICE_FUSION);
   opts.add_xla_gpu_enable_command_buffer(DebugOptions::FUSION);
+  opts.add_xla_gpu_enable_collectives_command_buffer_filter(
+      DebugOptions::ALLCOLLECTIVES);
   opts.set_xla_gpu_graph_min_graph_size(5);
   opts.set_xla_gpu_command_buffer_scheduling_mode(DebugOptions::LHS);
   opts.set_xla_gpu_command_buffer_unroll_loops(false);
@@ -300,6 +303,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_gpu_experimental_dynamic_slice_fusion_verify_offsets(false);
   opts.set_xla_gpu_nccl_termination_timeout_seconds(-1);
   opts.set_xla_gpu_enable_nccl_user_buffers(false);
+  opts.set_xla_gpu_enable_allocator_spatial_partitioning(true);
   opts.set_xla_gpu_experimental_enable_nccl_symmetric_buffers(false);
   opts.set_xla_gpu_experimental_enable_nvshmem(false);
   opts.set_xla_gpu_enable_nccl_comm_splitting(true);
@@ -413,7 +417,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
 #endif
 
   opts.set_xla_gpu_use_memcpy_local_p2p(false);
-  opts.set_xla_gpu_collective_permute_connected_components(false);
+  opts.set_xla_gpu_collective_permute_connected_components(true);
 
   opts.set_xla_reduce_window_rewrite_base_length(16);
 
@@ -498,7 +502,6 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_gpu_experimental_ragged_all_to_all_use_barrier(true);
   opts.set_xla_gpu_ragged_all_to_all_mode(
       DebugOptions::COLLECTIVES_PRIVATE_MEMORY);
-  opts.set_xla_gpu_experimental_ragged_all_to_all_zero_copy(true);
   opts.set_xla_gpu_experimental_use_ragged_dot_grouped_gemm(true);
   opts.set_xla_gpu_native_emitter_tune_unroll_factor_for_loops(false);
   opts.set_xla_gpu_experimental_use_ragged_dot_fusion(false);
@@ -1241,6 +1244,12 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       "over time. The only 'guarantee', such as it is, is that if you compile "
       "XLA and dump the optimized HLO for some graph, you should be able to "
       "run it again on the same device with the same build of XLA."));
+  flag_list->push_back(tsl::Flag(
+      "xla_run_hlo_passes_starting_from",
+      string_setter_for(&DebugOptions::set_xla_run_hlo_passes_starting_from),
+      debug_options->xla_run_hlo_passes_starting_from(),
+      "Run HLO passes starting from the pass with this name. All prior "
+      "passes in the pipeline will be skipped."));
   flag_list->push_back(
       tsl::Flag("xla_embed_ir_in_executable",
                 bool_setter_for(&DebugOptions::set_xla_embed_ir_in_executable),
@@ -1938,6 +1947,18 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       " to/from the default list."));
 
   flag_list->push_back(tsl::Flag(
+      "xla_gpu_enable_collectives_command_buffer_filter",
+      SetterForRepeatedEnum<DebugOptions::CollectiveOpType>(
+          "xla_gpu_enable_collectives_command_buffer_filter",
+          /*enum_prefix=*/"", &DebugOptions::CollectiveOpType_Parse,
+          debug_options
+              ->mutable_xla_gpu_enable_collectives_command_buffer_filter()),
+      collective_op_types_to_string(
+          debug_options->xla_gpu_enable_collectives_command_buffer_filter()),
+      "Only collectives specified in this filter will be executed in a "
+      "command buffer. Default is ALLCOLLECTIVES."));
+
+  flag_list->push_back(tsl::Flag(
       "xla_gpu_graph_min_graph_size",
       int32_setter_for(&DebugOptions::set_xla_gpu_graph_min_graph_size),
       debug_options->xla_gpu_graph_min_graph_size(),
@@ -2025,6 +2046,14 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       "Enables NCCL User Buffer Registration. collective_memory_size in the "
       "allocator config must also be set to a non-zero value that is large "
       "enough to meet peak collective memory usage."));
+  flag_list->push_back(tsl::Flag(
+      "xla_gpu_enable_allocator_spatial_partitioning",
+      bool_setter_for(
+          &DebugOptions::set_xla_gpu_enable_allocator_spatial_partitioning),
+      debug_options->xla_gpu_enable_allocator_spatial_partitioning(),
+      "Enables spatial partitioning of the GPU BFC allocator so default and "
+      "collective allocations share one fixed address range. Requires BFC "
+      "preallocation."));
   flag_list->push_back(tsl::Flag(
       "xla_gpu_experimental_enable_nccl_symmetric_buffers",
       bool_setter_for(
@@ -2935,6 +2964,12 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       debug_options->xla_hlo_pass_fix_detect_cycles(),
       "Perform hash-based cycle detection in fixed-point loops."));
   flag_list->push_back(tsl::Flag(
+      "xla_dump_compact_gte",
+      bool_setter_for(&DebugOptions::set_xla_dump_compact_gte),
+      debug_options->xla_dump_compact_gte(),
+      "If true, GTE (get-tuple-element) instructions will be compacted when "
+      "printing HLO."));
+  flag_list->push_back(tsl::Flag(
       "xla_gpu_experimental_enable_heuristic_collective_combining",
       bool_setter_for(
           &DebugOptions::
@@ -3078,14 +3113,6 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
                 "Memory mode for ragged-all-to-all: private, symmetric, peer. "
                 "In symmetric mode, the put/signal path is used. "
                 "See CollectivesMode for details."));
-  // TODO: b/482045400 - Remove double-copy approach once testing is complete.
-  flag_list->push_back(tsl::Flag(
-      "xla_gpu_experimental_ragged_all_to_all_zero_copy",
-      bool_setter_for(
-          &DebugOptions::set_xla_gpu_experimental_ragged_all_to_all_zero_copy),
-      debug_options->xla_gpu_experimental_ragged_all_to_all_zero_copy(),
-      "If true, use the Symmetric Memory mode for "
-      "MultiGpuBarrierWithNcclKernel"));
   flag_list->push_back(tsl::Flag(
       "xla_gpu_experimental_use_ragged_dot_grouped_gemm",
       bool_setter_for(
@@ -3250,7 +3277,6 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
                 bool_setter_for(&DebugOptions::set_xla_gpu_log_minmax),
                 debug_options->xla_gpu_log_minmax(),
                 "If true, log min/max values from kernel outputs."));
-
   flag_list->push_back(tsl::Flag(
       "xla_early_exit_with_layouts",
       bool_setter_for(&DebugOptions::set_xla_early_exit_with_layouts),

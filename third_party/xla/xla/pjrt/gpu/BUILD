@@ -138,14 +138,15 @@ cc_library(
         "//xla/service/gpu:gpu_memory_space_assignment",
         "//xla/stream_executor:device_address",
         "//xla/stream_executor:device_address_allocator",
+        "//xla/stream_executor:device_address_vmm_allocator",
         "//xla/stream_executor:device_description",
         "//xla/stream_executor:device_description_proto_cc",
         "//xla/stream_executor:device_interconnect_resource",
         "//xla/stream_executor:memory_space",
         "//xla/stream_executor:platform",
         "//xla/stream_executor:stream",
+        "//xla/stream_executor:stream_executor_address_allocator",
         "//xla/stream_executor:stream_executor_h",
-        "//xla/stream_executor:vmm_device_address_allocator",
         "//xla/stream_executor/integrations:device_mem_allocator",
         "//xla/stream_executor/integrations:tf_allocator_adapter",
         "//xla/tsl/concurrency:async_value",
@@ -301,6 +302,8 @@ xla_test(
         "//xla/service:gpu_topology",
         "//xla/service:gpu_topology_proto_cc",
         "//xla/service:platform_util",
+        "//xla/stream_executor:stream_executor_address_allocator",
+        "//xla/stream_executor/integrations:tf_allocator_adapter",
         "//xla/tests:literal_test_util",
         "//xla/tsl/concurrency:async_value",
         "//xla/tsl/concurrency:ref_count",
@@ -473,24 +476,6 @@ xla_test(
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings:string_view",
         "@llvm-project//mlir:IR",
-    ],
-)
-
-xla_test(
-    name = "pjrt_client_test_se_gpu",
-    srcs = ["pjrt_client_test_se_gpu.cc"],
-    backend_tags = {
-        "gpu": ["multi_gpu"],
-    },
-    backends = ["gpu"],
-    tags = [
-        "no_oss",
-        "notap",
-    ],
-    deps = [
-        ":se_gpu_pjrt_client",
-        "//xla/pjrt:pjrt_client_test_common",
-        "@com_google_googletest//:gtest_main",
     ],
 )
 

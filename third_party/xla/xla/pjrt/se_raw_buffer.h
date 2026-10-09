@@ -116,7 +116,6 @@ class PjRtStreamExecutorRawBuffer : public CommonPjRtRawBufferImpl {
       absl::AnyInvocable<void(absl::Status) &&> allocation_event) override;
 
   void ScheduleCopyTo(
-      AsyncWorkRunner* async_work_runner,
       PjRtDeviceEventRefVector transfer_dependency_events,
       PjRtRawBufferRef dst_raw_buffer,
       PjRtDeviceEventPromiseRef definition_event_promise,
@@ -125,10 +124,6 @@ class PjRtStreamExecutorRawBuffer : public CommonPjRtRawBufferImpl {
   PjRtDeviceEventPtr GetRawBufferAsyncValue() override {
     return PjRtDeviceEventPtr::FromAsyncValue(device_buffer_.GetAsyncValue());
   }
-
-  absl::StatusOr<PjRtDeviceEventRef> CopyRawToRemoteDevice(
-      Future<std::string> serialized_descriptor, RemoteSendCallback on_done,
-      PjRtDeviceEventRefVector transfer_dependency_avs) override;
 
   void DecrefAfter(PjRtDeviceEventRefVector avs) override { DropRef(); }
 

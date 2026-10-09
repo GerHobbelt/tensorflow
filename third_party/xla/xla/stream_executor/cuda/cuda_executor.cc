@@ -1465,7 +1465,13 @@ absl::StatusOr<std::unique_ptr<Event>> CudaExecutor::CreateEvent() {
 
 absl::StatusOr<std::unique_ptr<Stream>> CudaExecutor::CreateStream(
     std::optional<std::variant<StreamPriority, int>> priority) {
-  ASSIGN_OR_RETURN(auto stream, CudaStream::Create(this, priority));
+  return CreateStream(priority, CudaStreamType::kDefault);
+}
+
+absl::StatusOr<std::unique_ptr<CudaStream>> CudaExecutor::CreateStream(
+    std::optional<std::variant<StreamPriority, int>> priority,
+    CudaStreamType type) {
+  ASSIGN_OR_RETURN(auto stream, CudaStream::Create(this, priority, type));
   absl::MutexLock l(alive_gpu_streams_mu_);
   alive_gpu_streams_[stream->stream_handle()] = stream.get();
   return std::move(stream);
@@ -1622,6 +1628,8 @@ CudaExecutor::CreateDeviceDescription(int device_ordinal) {
         GetNumberOfActiveP2PNvlinks(*device);
     DeviceInterconnectInfo info;
     if (p2p_link_count.ok()) {
+      XLA_VLOG_DEVICE(3, device_ordinal)
+          << "p2p_link_count: " << *p2p_link_count;
       info.active_links = *p2p_link_count;
     } else {
       LOG(ERROR) << p2p_link_count;
@@ -1633,12 +1641,12 @@ CudaExecutor::CreateDeviceDescription(int device_ordinal) {
         info.cluster_uuid = fabric_info->cluster_uuid;
         info.clique_id = fabric_info->clique_id;
       }
-      desc.set_device_interconnect_info(info);
     } else {
       VLOG(1) << "Skipping GPU Fabric info retrieval; NVIDIA driver r545+ "
                  "is required. Current driver version: "
               << desc.kernel_mode_driver_version();
     }
+    desc.set_device_interconnect_info(info);
   }
 
   {
