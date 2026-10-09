@@ -25,6 +25,7 @@ limitations under the License.
 #include "absl/hash/hash.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
+#include "xla/tsl/platform/status_macros.h"
 #include "nanobind/nanobind.h"
 #include "nanobind/ndarray.h"
 #include "nanobind/stl/optional.h"  // IWYU pragma: keep
@@ -37,6 +38,8 @@ limitations under the License.
 #include "xla/hlo/ir/hlo_computation.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_module.h"
+#include "xla/hlo/ir/hlo_opcode.h"
+#include "xla/hlo/ir/hlo_schedule.h"
 #include "xla/hlo/ir/hlo_sharding.h"
 #include "xla/hlo/parser/hlo_parser.h"
 #include "xla/layout_util.h"
@@ -68,7 +71,7 @@ inline Py_hash_t AbslHashToPythonHash(size_t h) {
 
 absl::StatusOr<nb::dlpack::dtype> PrimitiveTypeToNbDLDataType(
     xla::PrimitiveType type) {
-  TF_ASSIGN_OR_RETURN(DLDataType dl_type, PrimitiveTypeToDLDataType(type));
+  ASSIGN_OR_RETURN(DLDataType dl_type, PrimitiveTypeToDLDataType(type));
 
   nb::dlpack::dtype nb_type;
   nb_type.lanes = dl_type.lanes;
@@ -105,20 +108,20 @@ absl::StatusOr<std::shared_ptr<HloModule>> HloModuleFromSerializedProto(
     const nb::bytes& bytes) {
   HloModuleProto proto;
   proto.ParseFromArray(bytes.c_str(), bytes.size());
-  TF_ASSIGN_OR_RETURN(const HloModuleConfig module_config,
-                      HloModule::CreateModuleConfigFromProto(
-                          proto, GetDebugOptionsFromFlags()));
-  TF_ASSIGN_OR_RETURN(std::unique_ptr<HloModule> module,
-                      HloModule::CreateFromProto(proto, module_config));
+  ASSIGN_OR_RETURN(const HloModuleConfig module_config,
+                   HloModule::CreateModuleConfigFromProto(
+                       proto, GetDebugOptionsFromFlags()));
+  ASSIGN_OR_RETURN(std::unique_ptr<HloModule> module,
+                   HloModule::CreateFromProto(proto, module_config));
   return std::shared_ptr<HloModule>(std::move(module));
 }
 
 absl::StatusOr<std::shared_ptr<HloModule>> GetHloModule(
     const XlaComputation& computation) {
-  TF_ASSIGN_OR_RETURN(const HloModuleConfig module_config,
-                      HloModule::CreateModuleConfigFromProto(
-                          computation.proto(), GetDebugOptionsFromFlags()));
-  TF_ASSIGN_OR_RETURN(
+  ASSIGN_OR_RETURN(const HloModuleConfig module_config,
+                   HloModule::CreateModuleConfigFromProto(
+                       computation.proto(), GetDebugOptionsFromFlags()));
+  ASSIGN_OR_RETURN(
       std::unique_ptr<HloModule> module,
       HloModule::CreateFromProto(computation.proto(), module_config));
   return std::shared_ptr<HloModule>(std::move(module));
@@ -127,8 +130,8 @@ absl::StatusOr<std::shared_ptr<HloModule>> GetHloModule(
 // Converts a computation to textual HLO form.
 absl::StatusOr<std::string> GetComputationHloText(
     const XlaComputation& computation, bool print_large_constants = false) {
-  TF_ASSIGN_OR_RETURN(std::shared_ptr<HloModule> hlo_module,
-                      GetHloModule(computation));
+  ASSIGN_OR_RETURN(std::shared_ptr<HloModule> hlo_module,
+                   GetHloModule(computation));
   HloPrintOptions options;
   options = HloPrintOptions::ShortParsable();
   options.set_print_large_constants(print_large_constants);
@@ -138,8 +141,8 @@ absl::StatusOr<std::string> GetComputationHloText(
 // Converts a computation to HLO dot graph form.
 absl::StatusOr<std::string> GetComputationHloDotGraph(
     const XlaComputation& computation) {
-  TF_ASSIGN_OR_RETURN(std::shared_ptr<HloModule> hlo_module,
-                      GetHloModule(computation));
+  ASSIGN_OR_RETURN(std::shared_ptr<HloModule> hlo_module,
+                   GetHloModule(computation));
   return RenderGraph(*hlo_module->entry_computation(), /*label=*/"",
                      hlo_module->config().debug_options(),
                      RenderedGraphFormat::kDot);
@@ -147,8 +150,8 @@ absl::StatusOr<std::string> GetComputationHloDotGraph(
 
 // Hashes the HLO module.
 absl::StatusOr<uint64_t> HashComputation(const XlaComputation& computation) {
-  TF_ASSIGN_OR_RETURN(std::shared_ptr<HloModule> hlo_module,
-                      GetHloModule(computation));
+  ASSIGN_OR_RETURN(std::shared_ptr<HloModule> hlo_module,
+                   GetHloModule(computation));
   return absl::HashOf(*hlo_module);
 }
 
@@ -160,17 +163,15 @@ absl::StatusOr<Shape> MakeShapeWithDenseLayout(
     std::optional<const std::vector<bool>> dynamic_dimensions) {
   Shape shape;
   if (dynamic_dimensions) {
-    TF_ASSIGN_OR_RETURN(
-        shape, ShapeUtil::MakeValidatedShape(element_type, dims,
-                                             dynamic_dimensions.value()));
+    ASSIGN_OR_RETURN(shape,
+                     ShapeUtil::MakeValidatedShape(element_type, dims,
+                                                   dynamic_dimensions.value()));
   } else {
-    TF_ASSIGN_OR_RETURN(shape,
-                        ShapeUtil::MakeValidatedShape(element_type, dims));
+    ASSIGN_OR_RETURN(shape, ShapeUtil::MakeValidatedShape(element_type, dims));
   }
   if (minor_to_major) {
     *shape.mutable_layout() = LayoutUtil::MakeLayout(*minor_to_major);
-    TF_RETURN_IF_ERROR(
-        LayoutUtil::ValidateLayoutForShape(shape.layout(), shape));
+    RETURN_IF_ERROR(LayoutUtil::ValidateLayoutForShape(shape.layout(), shape));
   }
 
   return shape;
@@ -375,6 +376,11 @@ NB_MODULE(_hlo, m) {
       .value("TUPLE", TUPLE)
       .value("OPAQUE_TYPE", OPAQUE_TYPE)
       .value("TOKEN", TOKEN);
+
+  nb::enum_<xla::HloOpcode>(m, "HloOpcode")
+#define BIND_ENUM(enum_name, ...) .value(#enum_name, xla::HloOpcode::enum_name)
+      HLO_OPCODE_LIST(BIND_ENUM);
+#undef BIND_ENUM
 
   // Shapes
   nb::class_<Layout> layout_class(m, "Layout");
@@ -701,6 +707,77 @@ NB_MODULE(_hlo, m) {
                    &HloPrintOptions::is_in_nested_computation,
                    &HloPrintOptions::set_is_in_nested_computation);
 
+  class InstructionWrapper {
+   public:
+    InstructionWrapper(const HloInstruction* inst,
+                       const std::shared_ptr<HloModule> module)
+        : inst_(inst), module_(module) {
+      if (inst == nullptr) {
+        throw XlaRuntimeError("InstructionWrapper cannot wrap a nullptr.");
+      }
+    }
+    absl::string_view name() const { return inst_->name(); }
+    std::string to_string() const { return inst_->ToString(); }
+    xla::HloOpcode opcode() const { return inst_->opcode(); }
+    std::vector<std::shared_ptr<InstructionWrapper>> users() const {
+      std::vector<std::shared_ptr<InstructionWrapper>> users;
+      for (const HloInstruction* user : inst_->users()) {
+        users.push_back(std::make_shared<InstructionWrapper>(user, module_));
+      }
+      return users;
+    }
+    std::vector<std::shared_ptr<InstructionWrapper>> operands() const {
+      std::vector<std::shared_ptr<InstructionWrapper>> operands;
+      for (const HloInstruction* operand : inst_->operands()) {
+        operands.push_back(
+            std::make_shared<InstructionWrapper>(operand, module_));
+      }
+      return operands;
+    }
+
+    const HloInstruction* inst() const { return inst_; }
+    std::shared_ptr<InstructionWrapper> async_wrapped_root() const {
+      const HloInstruction* start = nullptr;
+      if (inst_->opcode() == xla::HloOpcode::kAsyncStart) {
+        start = inst_;
+      } else if (inst_->opcode() == xla::HloOpcode::kAsyncDone) {
+        if (inst_->operands().empty()) {
+          return nullptr;
+        }
+        start = inst_->operands().front();
+      } else {
+        return nullptr;
+      }
+      if (start->called_computations().empty()) {
+        return nullptr;
+      }
+      const HloComputation* comp = start->called_computations().front();
+      const HloInstruction* root = comp->root_instruction();
+      if (root == nullptr) {
+        return nullptr;
+      }
+      return std::make_shared<InstructionWrapper>(root, module_);
+    }
+    Py_hash_t hash() const { return AbslHashToPythonHash(absl::HashOf(inst_)); }
+    bool operator==(const InstructionWrapper& other) const {
+      return inst_ == other.inst_;
+    }
+
+   private:
+    const HloInstruction* inst_;
+    const std::shared_ptr<HloModule> module_;
+  };
+
+  nb::class_<InstructionWrapper> hlo_instruction_class(m, "HloInstruction");
+  hlo_instruction_class.def_prop_ro("name", &InstructionWrapper::name)
+      .def("to_string", &InstructionWrapper::to_string)
+      .def_prop_ro("opcode", &InstructionWrapper::opcode)
+      .def("users", &InstructionWrapper::users)
+      .def("operands", &InstructionWrapper::operands)
+      .def("async_wrapped_root", &InstructionWrapper::async_wrapped_root)
+      .def("__hash__", &InstructionWrapper::hash)
+      .def("__eq__", &InstructionWrapper::operator==);
+
   // HloModule.computations() returns raw pointers.
   // pybind seems to prefer smart pointers.
   // We give pybind a smart pointer to a wrapper around a raw pointer to satisfy
@@ -718,6 +795,8 @@ NB_MODULE(_hlo, m) {
       xla::ThrowIfError(tsl::WriteStringToFile(
           tsl::Env::Default(), absl::StrCat(filename, ".html"), html));
     }
+    const HloComputation* comp() const { return comp_; }
+    const std::shared_ptr<HloModule> module() const { return module_; }
 
    private:
     const HloComputation* comp_;
@@ -731,7 +810,84 @@ NB_MODULE(_hlo, m) {
 
   nb::class_<ComputationWrapper> hlo_computation_class(m, "HloComputation");
   hlo_computation_class.def_prop_ro("name", &ComputationWrapper::name)
-      .def("render_html", &ComputationWrapper::render_html);
+      .def("render_html", &ComputationWrapper::render_html)
+      .def("instructions",
+           [](const std::shared_ptr<ComputationWrapper> c)
+               -> std::vector<std::shared_ptr<InstructionWrapper>> {
+             std::vector<std::shared_ptr<InstructionWrapper>> instructions;
+             for (const HloInstruction* inst : c->comp()->instructions()) {
+               instructions.push_back(
+                   std::make_shared<InstructionWrapper>(inst, c->module()));
+             }
+             return instructions;
+           });
+
+  hlo_computation_class.def(
+      "replace_instruction",
+      [](ComputationWrapper& c, std::shared_ptr<InstructionWrapper> old_inst,
+         std::shared_ptr<InstructionWrapper> new_inst) {
+        if (old_inst == nullptr || new_inst == nullptr) {
+          throw XlaRuntimeError(
+              "replace_instruction arguments cannot be None.");
+        }
+        xla::ThrowIfError(
+            const_cast<HloComputation*>(c.comp())->ReplaceInstruction(
+                const_cast<HloInstruction*>(old_inst->inst()),
+                const_cast<HloInstruction*>(new_inst->inst())));
+      });
+
+  class ScheduleWrapper {
+   public:
+    ScheduleWrapper(const HloSchedule& schedule,
+                    const std::shared_ptr<HloModule> module)
+        : schedule_(schedule), module_(module) {}
+    std::string to_string() const { return schedule_.ToString(); }
+    const HloSchedule& schedule() const { return schedule_; }
+    HloSchedule& mutable_schedule() { return schedule_; }
+    std::shared_ptr<HloModule> module() const { return module_; }
+
+   private:
+    HloSchedule schedule_;
+    const std::shared_ptr<HloModule> module_;
+  };
+
+  nb::class_<ScheduleWrapper> hlo_schedule_class(m, "HloSchedule");
+  hlo_schedule_class.def("to_string", &ScheduleWrapper::to_string)
+      .def("sequence",
+           [](const ScheduleWrapper& s, const ComputationWrapper& c)
+               -> std::vector<std::shared_ptr<InstructionWrapper>> {
+             std::vector<std::shared_ptr<InstructionWrapper>> instructions;
+             const HloInstructionSequence& seq =
+                 s.schedule().sequence(c.comp());
+             for (const HloInstruction* inst : seq.instructions()) {
+               instructions.push_back(
+                   std::make_shared<InstructionWrapper>(inst, s.module()));
+             }
+             return instructions;
+           })
+      .def("set_sequence",
+           [](ScheduleWrapper& s, const ComputationWrapper& c,
+              const std::vector<std::shared_ptr<InstructionWrapper>>&
+                  instructions) {
+             std::vector<HloInstruction*> raw_instructions;
+             raw_instructions.reserve(instructions.size());
+             for (const auto& wrapper : instructions) {
+               if (wrapper == nullptr) {
+                 throw XlaRuntimeError(
+                     "Sequence instructions cannot contain None.");
+               }
+               raw_instructions.push_back(
+                   const_cast<HloInstruction*>(wrapper->inst()));
+             }
+             s.mutable_schedule().set_sequence(c.comp(), raw_instructions);
+           })
+      .def("update",
+           [](ScheduleWrapper& s) {
+             xla::ThrowIfError(s.mutable_schedule().Update());
+           })
+      .def("verify", [](const ScheduleWrapper& s) {
+        xla::ThrowIfError(s.schedule().Verify());
+      });
 
   nb::class_<HloModule> hlo_module_class(m, "HloModule");
   hlo_module_class.def_prop_ro("name", &HloModule::name)
@@ -740,6 +896,20 @@ NB_MODULE(_hlo, m) {
           static_cast<std::string (HloModule::*)(const HloPrintOptions&) const>(
               &HloModule::ToString),
           nb::arg("options") = HloPrintOptions())
+      .def("schedule",
+           [](const std::shared_ptr<HloModule> m)
+               -> std::optional<ScheduleWrapper> {
+             if (!m->has_schedule()) return std::nullopt;
+             return ScheduleWrapper(m->schedule(), m);
+           })
+      .def("set_schedule",
+           [](std::shared_ptr<HloModule> m, const ScheduleWrapper& s) {
+             xla::ThrowIfError(m->set_schedule(s.schedule()));
+           })
+      .def("create_empty_schedule",
+           [](const std::shared_ptr<HloModule> m) {
+             return ScheduleWrapper(xla::HloSchedule(m.get()), m);
+           })
       .def("as_serialized_hlo_module_proto",
            xla::ValueOrThrowWrapper(GetHloModuleSerializedProto))
       .def("from_serialized_hlo_module_proto",
@@ -749,6 +919,15 @@ NB_MODULE(_hlo, m) {
                -> std::vector<std::shared_ptr<ComputationWrapper>> {
              std::vector<std::shared_ptr<ComputationWrapper>> computations;
              for (HloComputation* comp : m->computations())
+               computations.push_back(
+                   std::make_shared<ComputationWrapper>(comp, m));
+             return computations;
+           })
+      .def("make_nonfusion_computations",
+           [](const std::shared_ptr<HloModule> m)
+               -> std::vector<std::shared_ptr<ComputationWrapper>> {
+             std::vector<std::shared_ptr<ComputationWrapper>> computations;
+             for (HloComputation* comp : m->MakeNonfusionComputations())
                computations.push_back(
                    std::make_shared<ComputationWrapper>(comp, m));
              return computations;
@@ -961,7 +1140,7 @@ NB_MODULE(_hlo, m) {
                 -> absl::StatusOr<std::shared_ptr<HloModule>> {
               auto hlo_module =
                   xla::ParseAndReturnUnverifiedModule(hlo_module_text);
-              TF_RETURN_IF_ERROR(hlo_module.status());
+              RETURN_IF_ERROR(hlo_module.status());
               std::shared_ptr<HloModule> result(std::move(*hlo_module));
               return result;
             }));

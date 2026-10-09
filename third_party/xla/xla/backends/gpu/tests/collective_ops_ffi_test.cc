@@ -26,7 +26,6 @@ limitations under the License.
 #include "absl/strings/substitute.h"
 #include "absl/synchronization/blocking_counter.h"
 #include "absl/synchronization/mutex.h"
-#include "absl/synchronization/notification.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "absl/types/span.h"
@@ -1007,11 +1006,6 @@ TEST_P(AllReduceTest, DeviceAllReduce) {
     GTEST_SKIP() << "NCCL symmetric memory requires Hopper+";
   }
 
-  GpuCollectives* collectives = GpuCollectives::Default("CUDA");
-  if (!collectives || !collectives->SupportsDeviceComm()) {
-    GTEST_SKIP() << "GPU collectives do not support device communication";
-  }
-
   std::string hlo_string = absl::Substitute(R"(
       HloModule m, replica_count=2
 
@@ -1107,9 +1101,10 @@ TEST_P(AllReduceTest, MulticastAllReduce) {
       ENTRY test_computation {
         c0 = u32[] constant(1)
         in = u32[]{:S(1)} copy(c0)
-        ROOT all-reduce = u32[] custom-call(in),
+        all-reduce = u32[] custom-call(in),
           custom_call_target="__xla_test_$0_multimem_all_reduce",
           api_version=API_VERSION_TYPED_FFI
+        ROOT out = u32[] copy(all-reduce)
       }
     )",
                                             GetParam());
@@ -1144,20 +1139,16 @@ TEST_P(AllReduceTest, SymMulticastAllReduce) {
     GTEST_SKIP() << "Test requires Hopper+";
   }
 
-  GpuCollectives* collectives = GpuCollectives::Default("CUDA");
-  if (!collectives || !collectives->SupportsOneSidedComm()) {
-    GTEST_SKIP() << "GPU collectives do not support one sided comm";
-  }
-
   std::string hlo_string = absl::Substitute(R"(
       HloModule m, replica_count=2
 
       ENTRY test_computation {
         c0 = u32[] constant(1)
         in = u32[]{:S(1)} copy(c0)
-        ROOT all-reduce = u32[] custom-call(in),
+        all-reduce = u32[] custom-call(in),
           custom_call_target="__xla_test_$0_sym_multimem_all_reduce",
           api_version=API_VERSION_TYPED_FFI
+        ROOT out = u32[] copy(all-reduce)
       }
     )",
                                             GetParam());
@@ -1193,20 +1184,16 @@ TEST_P(AllReduceTest, SymPeerAllReduce) {
                     "are no guarantees that GPUs have direct peer access";
   }
 
-  GpuCollectives* collectives = GpuCollectives::Default("CUDA");
-  if (!collectives || !collectives->SupportsOneSidedComm()) {
-    GTEST_SKIP() << "GPU collectives do not support one sided comm";
-  }
-
   std::string hlo_string = absl::Substitute(R"(
       HloModule m, replica_count=2
 
       ENTRY test_computation {
         id = u32[] replica-id()
         in = u32[]{:S(1)} copy(id)
-        ROOT all-reduce = u32[] custom-call(in),
+        all-reduce = u32[] custom-call(in),
           custom_call_target="__xla_test_$0_sym_peer_all_reduce",
           api_version=API_VERSION_TYPED_FFI
+        ROOT out = u32[] copy(all-reduce)
       }
     )",
                                             GetParam());
@@ -1248,11 +1235,6 @@ TEST_F(CollectiveOpsTestFFI, DeviceAllReduceWithFrontendAttributes) {
 
   if (!IsHopperAndHigher()) {
     GTEST_SKIP() << "NCCL symmetric memory requires Hopper+";
-  }
-
-  GpuCollectives* collectives = GpuCollectives::Default("CUDA");
-  if (!collectives || !collectives->SupportsDeviceComm()) {
-    GTEST_SKIP() << "GPU collectives do not support device communication";
   }
 
   constexpr absl::string_view hlo_string = R"(

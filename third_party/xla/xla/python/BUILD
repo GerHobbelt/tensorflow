@@ -394,6 +394,7 @@ nanobind_pywrap_extension(
         "//xla/service/spmd/shardy/stablehlo_round_trip:stablehlo_import",
         "//xla/tsl/lib/strings:proto_serialization",
         "//xla/tsl/platform:errors",
+        "//xla/tsl/platform:status_macros",
         "//xla/tsl/platform:statusor",
         "//xla/tsl/python/lib/core:numpy",
         "@com_google_absl//absl/base",
@@ -792,5 +793,21 @@ py_test(
         ":xla_transform",
         "//third_party/py/numpy",
         "@absl_py//absl/testing:absltest",
+    ] + xla_py_test_deps(),
+)
+
+py_test(
+    name = "xla_hlo_test",
+    srcs = ["xla_hlo_test.py"],
+    main = "xla_hlo_test.py",
+    strict_deps = True,
+    tags = ["no_oss"],
+    deps = [
+        ":_hlo",
+        ":xla_client",
+        "//third_party/py/numpy",
+        "@absl_py//absl/logging",
+        "@absl_py//absl/testing:absltest",
+        "@absl_py//absl/testing:parameterized",
     ] + xla_py_test_deps(),
 )

@@ -298,7 +298,7 @@ struct BlasLt {
   virtual absl::StatusOr<MatmulPlanPtr> GetMatmulPlan(
       const GemmConfig& cfg, Epilogue epilogue) const = 0;
 
-  virtual absl::StatusOr<MatmulPlanPtr> GetGroupedMatmulPlan(
+  virtual absl::StatusOr<MatmulPlanPtr> GetMatmulPlan(
       const gpu::GroupedGemmConfig& config, Epilogue epilogue) const = 0;
 
   static absl::StatusOr<BlasLt*> Get(StreamExecutor* executor);
@@ -308,29 +308,21 @@ struct BlasLt {
   static absl::StatusOr<MatmulPlanPtr> GetMatmulPlan(Stream* stream,
                                                      const GemmConfig& cfg,
                                                      Epilogue epilogue) {
-    TF_ASSIGN_OR_RETURN(auto* blas_lt, Get(stream->parent()));
+    ASSIGN_OR_RETURN(auto* blas_lt, Get(stream->parent()));
     return blas_lt->GetMatmulPlan(cfg, epilogue);
   }
 
   absl::StatusOr<MatmulPlan*> GetOrCreateMatmulPlan(const std::string& key,
                                                     PlanCreateFunc create);
 
-  absl::StatusOr<MatmulPlan*> GetOrCreateGroupedMatmulPlan(
-      const std::string& key, PlanCreateFunc create);
-
   void ClearMatmulPlanCache();
   size_t GetMatmulPlanCacheSize() const;
-
-  void ClearGroupedMatmulPlanCache();
-  size_t GetGroupedMatmulPlanCacheSize() const;
 
   virtual ~BlasLt() = default;
 
  protected:
   mutable absl::Mutex plan_cache_mu_;
   absl::flat_hash_map<std::string, MatmulPlanPtr> plan_cache_
-      ABSL_GUARDED_BY(plan_cache_mu_);
-  absl::flat_hash_map<std::string, MatmulPlanPtr> grouped_plan_cache_
       ABSL_GUARDED_BY(plan_cache_mu_);
 };  // class BlasLt
 
