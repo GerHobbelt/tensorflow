@@ -47,6 +47,7 @@ limitations under the License.
 #include "absl/synchronization/mutex.h"
 #include "absl/synchronization/notification.h"
 #include "absl/types/span.h"
+#include "xla/tsl/platform/status_macros.h"
 #include "third_party/gpus/cuda/include/cuda.h"
 #include "third_party/gpus/cuda/include/cuda_runtime_api.h"
 #include "third_party/gpus/cuda/include/driver_types.h"
@@ -113,7 +114,6 @@ limitations under the License.
 #include "tsl/platform/fingerprint.h"
 #include "tsl/platform/numa.h"
 #include "tsl/platform/numbers.h"
-#include "xla/tsl/platform/status_macros.h"
 
 namespace stream_executor {
 namespace gpu {
@@ -427,7 +427,7 @@ absl::Status EnablePeerAccess(Context* from, Context* to) {
 
   ScopedActivateContext activated{from};
   CUresult result = cuCtxEnablePeerAccess(
-      tensorflow::down_cast<CudaContext*>(to)->context(), 0 /* = flags */);
+      absl::down_cast<CudaContext*>(to)->context(), 0 /* = flags */);
   if (result != CUDA_SUCCESS &&
       result != CUDA_ERROR_PEER_ACCESS_ALREADY_ENABLED) {
     return absl::InternalError(
@@ -734,7 +734,7 @@ absl::StatusOr<xla::gpu::GpuCollectives*> GetGpuCollectives(
   std::unique_ptr<ActivateContext> activation = executor->Activate();
   TF_ASSIGN_OR_RETURN(xla::Collectives * collectives,
                       xla::CollectivesRegistry::Default("gpu"));
-  return tsl::down_cast<xla::gpu::GpuCollectives*>(collectives);
+  return absl::down_cast<xla::gpu::GpuCollectives*>(collectives);
 }
 
 CudaExecutor::VmmMemoryHandle::~VmmMemoryHandle() { CHECK_OK(Release()); }
@@ -1292,22 +1292,6 @@ bool CudaExecutor::HostMemoryUnregister(void* location) {
   XLA_VLOG_DEVICE(1, device_ordinal())
       << "Called StreamExecutor::HostUnregister(data=" << location << ")";
   return HostUnregister(cuda_context_, location);
-}
-
-absl::Status CudaExecutor::SynchronousMemZero(DeviceAddressBase* location,
-                                              uint64_t size) {
-  std::unique_ptr<ActivateContext> activation = Activate();
-  // cuMemset calls are usually asynchronous with respect to the host and issue
-  // operations on the default stream. XLA's streams are non-blocking
-  // (CU_STREAM_NON_BLOCKING) and, therefore, not ordered with respect to the
-  // default stream.
-  // https://docs.nvidia.com/cuda/cuda-driver-api/api-sync-behavior.html#api-sync-behavior__memset
-  // If an appropriate stream is available at the call site, use it instead of
-  // this method.
-  TF_ASSIGN_OR_RETURN(std::unique_ptr<Stream> stream,
-                      StreamExecutor::CreateStream());
-  TF_RETURN_IF_ERROR(stream->MemZero(location, size));
-  return stream->BlockHostUntilDone();
 }
 
 absl::Status CudaExecutor::SynchronousMemcpy(DeviceAddressBase* gpu_dst,

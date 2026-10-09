@@ -36,6 +36,7 @@ limitations under the License.
 #include "absl/strings/substitute.h"
 #include "absl/synchronization/mutex.h"
 #include "absl/types/span.h"
+#include "xla/tsl/platform/status_macros.h"
 #include "xla/backends/gpu/collectives/gpu_clique_key.h"
 #include "xla/backends/gpu/collectives/gpu_collectives.h"
 #include "xla/backends/gpu/collectives/gpu_communicator.h"
@@ -71,7 +72,6 @@ limitations under the License.
 #include "xla/util.h"
 #include "xla/xla_data.pb.h"
 #include "tsl/platform/casts.h"
-#include "xla/tsl/platform/status_macros.h"
 
 namespace xla {
 namespace gpu {
@@ -723,11 +723,6 @@ absl::Status RunOneShotRaggedAllToAllWithNccl(
       << ", address=" << barrier_signal_symmetric_memory->addr().opaque()
       << ", size=" << barrier_signal_symmetric_memory->addr().size() << ")";
 
-  // Copy the output buffer to the symmetric temporary output buffer.
-  se::DeviceAddressBase output_temporary_symmetric_memory_addr =
-      output_temporary_symmetric_memory->addr();
-  TF_RETURN_IF_ERROR(stream.MemcpyD2D(&output_temporary_symmetric_memory_addr,
-                                      output_buffer, output_buffer.size()));
   // 1. Barrier (Pre-Kernel)
   // Global synchronization before P2P writes.
   // Ensures that all peers have reached this point and their output buffers

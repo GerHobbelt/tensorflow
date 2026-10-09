@@ -31,6 +31,7 @@ limitations under the License.
 #include "google/protobuf/text_format.h"
 #include "xla/autotuning.pb.h"
 #include "xla/backends/autotuner/codegen_backend.h"
+#include "xla/backends/gpu/target_config/target_config.h"
 #include "xla/hlo/analysis/symbolic_expr.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_module.h"
@@ -166,9 +167,6 @@ TEST_F(TritonBackendTest, GetSupportedConfigs) {
 }
 
 TEST_F(TritonBackendTest, GetSupportedConfigsForScaledDot) {
-  if (target_config_.device_description.gpu_compute_capability().IsRocm()) {
-    GTEST_SKIP() << "Triton scaled dot not supported on ROCm.";
-  }
   TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<HloModule> module,
                           ParseAndReturnVerifiedModule(kScaledDotHlo));
   HloInstruction* fusion_instr =
@@ -180,9 +178,6 @@ TEST_F(TritonBackendTest, GetSupportedConfigsForScaledDot) {
 }
 
 TEST_F(TritonBackendTest, GetAndApplyConfigForScaledDot) {
-  if (target_config_.device_description.gpu_compute_capability().IsRocm()) {
-    GTEST_SKIP() << "Triton scaled dot not supported on ROCm.";
-  }
   TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<HloModule> module,
                           ParseAndReturnVerifiedModule(kScaledDotHlo));
   HloInstruction* fusion_instr =
@@ -449,10 +444,6 @@ TEST_F(TritonBackendTest, VerifyHopperConfigsAreDifferentFromBlackwell) {
 }
 
 TEST_F(TritonBackendTest, ScaledDotConfigsAreGenerated) {
-  if (target_config_.device_description.gpu_compute_capability().IsRocm()) {
-    GTEST_SKIP() << "Not supported on ROCm.";
-  }
-
   se::CudaComputeCapability blackwell_cap{se::CudaComputeCapability::kBlackwell,
                                           /*minor=*/0};
   target_config_.device_description.set_gpu_compute_capability(
@@ -542,9 +533,11 @@ TEST_F(TritonBackendTest, TmaConfigsAreGeneratedOnlyForHopperAndWorkCorrectly) {
 
   // Hopper
   {
-    se::CudaComputeCapability hopper_cap{se::CudaComputeCapability::kHopper, 0};
-    target_config_.device_description.set_gpu_compute_capability(
-        se::GpuComputeCapability{hopper_cap});
+    TF_ASSERT_OK_AND_ASSIGN(auto target_config_proto,
+                            GetGpuTargetConfig(GpuModel::H100_SXM));
+    TF_ASSERT_OK_AND_ASSIGN(auto hopper_config,
+                            GpuTargetConfig::FromProto(target_config_proto));
+    target_config_ = hopper_config;
     TF_ASSERT_OK_AND_ASSIGN(
         std::vector<std::unique_ptr<BackendConfig>> configs,
         backend_.GetSupportedConfigs(

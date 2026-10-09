@@ -197,6 +197,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_dump_hlo_as_html(false);
   opts.set_xla_dump_fusion_visualization(false);
   opts.set_xla_dump_include_timestamp(false);
+  opts.set_xla_dump_hlo_to_subfolder(false);
   opts.set_xla_dump_max_hlo_modules(-1);
   opts.set_xla_dump_module_metadata(false);
   opts.set_xla_dump_hlo_as_long_text(true);
@@ -473,7 +474,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_enable_scoped_logging_timers(true);
   opts.set_xla_unsupported_crash_on_hlo_pass_noop_change(false);
   opts.set_xla_gpu_experimental_enable_collective_multi_streaming(false);
-  opts.set_xla_gpu_experimental_enable_split_k_rewrite(true);
+  opts.set_xla_gpu_experimental_force_split_k(0);
   opts.set_xla_gpu_experimental_enable_triton_warp_specialization(false);
   opts.set_xla_detect_unstable_reductions(DebugOptions::DETECTION_MODE_NONE);
   opts.set_xla_detect_unstable_reductions_post_optimizations(
@@ -1538,6 +1539,12 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
                 bool_setter_for(&DebugOptions::set_xla_dump_include_timestamp),
                 debug_options->xla_dump_include_timestamp(),
                 "If specified, includes a timestamp in the dumped filenames."));
+  flag_list->push_back(tsl::Flag(
+      "xla_dump_hlo_to_subfolder",
+      bool_setter_for(&DebugOptions::set_xla_dump_hlo_to_subfolder),
+      debug_options->xla_dump_hlo_to_subfolder(),
+      "If true, dumps HLO modules in a subfolder titled the HLO module "
+      "name in the directory specified by --xla_dump_to."));
   flag_list->push_back(
       tsl::Flag("xla_dump_max_hlo_modules",
                 int32_setter_for(&DebugOptions::set_xla_dump_max_hlo_modules),
@@ -2828,12 +2835,11 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       "tables for matmuls. Expects `xla.gpu.DeviceHloInstructionProfiles` "
       "proto."));
   flag_list->push_back(tsl::Flag(
-      "xla_gpu_experimental_enable_split_k_rewrite",
-      bool_setter_for(
-          &DebugOptions::set_xla_gpu_experimental_enable_split_k_rewrite),
-      debug_options->xla_gpu_experimental_enable_split_k_rewrite(),
-      "Enable the pass that splits GEMMs that underutilize the GPU load by "
-      "splitting the K dimension using a heuristic."));
+      "xla_gpu_experimental_force_split_k",
+      int32_setter_for(&DebugOptions::set_xla_gpu_experimental_force_split_k),
+      debug_options->xla_gpu_experimental_force_split_k(),
+      "Force a specific split_k value. Zero (default) means do not force "
+      "split_k and use the heuristic."));
   flag_list->push_back(tsl::Flag(
       "xla_gpu_experimental_enable_triton_warp_specialization",
       bool_setter_for(

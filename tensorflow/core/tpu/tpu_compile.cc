@@ -31,6 +31,7 @@ limitations under the License.
 #include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
+#include "absl/strings/str_cat.h"
 #include "absl/types/span.h"
 #include "tensorflow/compiler/jit/flags.h"
 #include "tensorflow/compiler/jit/shape_inference.h"
@@ -396,7 +397,7 @@ absl::Status BuildComputationArgumentDescriptions(
     arg.is_same_data_across_replicas = proto_arg.is_same_data_across_replicas();
     arg.requires_broadcast = proto_arg.requires_xla_broadcast();
     if (arg.kind == XlaCompiler::Argument::kInvalid) {
-      return errors::InvalidArgument("Invalid argument kind");
+      return absl::InvalidArgumentError("Invalid argument kind");
     }
     if (arg.kind == XlaCompiler::Argument::kConstant) {
       continue;
