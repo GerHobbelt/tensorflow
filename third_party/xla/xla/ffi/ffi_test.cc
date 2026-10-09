@@ -38,6 +38,7 @@ limitations under the License.
 #include "xla/backends/cpu/ffi.h"
 #include "xla/backends/gpu/ffi.h"
 #include "xla/executable_run_options.h"
+#include "xla/ffi/api/api.h"
 #include "xla/ffi/api/c_api.h"
 #include "xla/ffi/attribute_map.h"
 #include "xla/ffi/call_frame.h"
@@ -265,6 +266,76 @@ TEST(FfiTest, RunId) {
 
   auto status = Invoke(Api(), *handler, call_frame, context);
   TF_ASSERT_OK(status);
+}
+
+struct MyExtension {
+  static constexpr int64_t kExtensionType = 1234;
+  static constexpr int64_t kMajorVersion = 1;
+  static constexpr int64_t kMinorVersion = 2;
+  XLA_FFI_Extension extension_base;
+  int32_t my_data;
+};
+
+struct AnotherExtension {
+  static constexpr int64_t kExtensionType = 1236;
+  static constexpr int64_t kMajorVersion = 3;
+  static constexpr int64_t kMinorVersion = 4;
+  XLA_FFI_Extension extension_base;
+  int32_t my_data;
+};
+
+TEST(FfiTest, DecodeExtension) {
+  MyExtension test_ext;
+  test_ext.extension_base = MakeExtensionHeader<MyExtension>();
+  test_ext.my_data = 42;
+
+  bool handler_called = false;
+
+  auto handler = Ffi::Bind().Ctx<FfiExtension<MyExtension>>().To(
+      [&](const MyExtension* ext) -> absl::Status {
+        EXPECT_NE(ext, nullptr);
+        EXPECT_EQ(ext->my_data, 42);
+        EXPECT_EQ(ext->extension_base.id.major_version,
+                  MyExtension::kMajorVersion);
+        EXPECT_EQ(ext->extension_base.id.minor_version,
+                  MyExtension::kMinorVersion);
+        handler_called = true;
+        return absl::OkStatus();
+      });
+
+  CallFrameBuilder builder(/*num_args=*/0, /*num_rets=*/0);
+  auto call_frame = builder.Build();
+
+  InvokeContext context;
+  context.extension_start = reinterpret_cast<XLA_FFI_Extension*>(&test_ext);
+
+  auto status = Invoke(Api(), *handler, call_frame, context);
+  EXPECT_TRUE(handler_called);
+  ASSERT_OK(status);
+}
+
+TEST(FfiTest, DecodeExtensionNotFound) {
+  MyExtension test_ext;
+  test_ext.extension_base = MakeExtensionHeader<MyExtension>();
+  test_ext.my_data = 42;
+  bool handler_called = false;
+
+  auto handler = Ffi::Bind().Ctx<FfiExtension<AnotherExtension>>().To(
+      [&](const AnotherExtension* ext) -> absl::Status {
+        handler_called = true;
+        return absl::OkStatus();
+      });
+
+  CallFrameBuilder builder(/*num_args=*/0, /*num_rets=*/0);
+  auto call_frame = builder.Build();
+
+  InvokeContext context;
+  context.extension_start = reinterpret_cast<XLA_FFI_Extension*>(&test_ext);
+
+  auto status = Invoke(Api(), *handler, call_frame, context);
+  EXPECT_FALSE(status.ok());
+  EXPECT_THAT(status.message(), HasSubstr("Extension not found in context"));
+  EXPECT_FALSE(handler_called);
 }
 
 TEST(FfiTest, BuiltinAttributes) {
@@ -771,6 +842,69 @@ TEST(FfiTest, BufferMatchingVerifiesRankSet) {
       Verify("input", AnyBuffer(&rank3_buffer), rank_pattern),
       absl_testing::StatusIs(absl::StatusCode::kInvalidArgument,
                              HasSubstr("expected rank to be one of [1, 2]")));
+}
+
+TEST(FfiTest, BufferMatchingMatchesShapeAndDTypeOfBuffer) {
+  namespace m = ::xla::ffi::match;
+
+  std::vector<float> reference_storage(6, 0.0f);
+  int64_t reference_dims[] = {2, 3};
+  XLA_FFI_Buffer reference_buffer = MakeBuffer(
+      F32, absl::MakeSpan(reference_storage), absl::MakeSpan(reference_dims));
+  AnyBuffer reference(&reference_buffer);
+
+  std::vector<float> matching_storage(6, 0.0f);
+  int64_t matching_dims[] = {2, 3};
+  XLA_FFI_Buffer matching_buffer = MakeBuffer(
+      F32, absl::MakeSpan(matching_storage), absl::MakeSpan(matching_dims));
+
+  auto like_reference = m::Buffer<S32, 1>().Like(reference).WithRank<2>();
+  ASSERT_OK(Verify("matching", AnyBuffer(&matching_buffer), like_reference));
+
+  ASSERT_OK(Verify("static_rank_replaced", AnyBuffer(&matching_buffer),
+                   m::Buffer<F32, 1>().WithShapeOf(reference)));
+
+  std::vector<int32_t> s32_storage(6, 0);
+  XLA_FFI_Buffer s32_buffer = MakeBuffer(S32, absl::MakeSpan(s32_storage),
+                                         absl::MakeSpan(matching_dims));
+  ASSERT_OK(Verify("same_shape", AnyBuffer(&s32_buffer),
+                   m::Buffer().WithShapeOf(reference)));
+
+  ASSERT_OK(Verify("runtime_dtype_replaced", AnyBuffer(&s32_buffer),
+                   m::Buffer().Like(reference).WithDType<S32>()));
+
+  int64_t rank_one_dims[] = {2};
+  XLA_FFI_Buffer rank_one_buffer = MakeBuffer(
+      F32, absl::MakeSpan(matching_storage), absl::MakeSpan(rank_one_dims));
+  ASSERT_OK(Verify(
+      "runtime_rank_replaced", AnyBuffer(&matching_buffer),
+      m::Buffer().WithShapeOf(AnyBuffer(&rank_one_buffer)).WithRank<2>()));
+
+  EXPECT_THAT(
+      Verify("wrong_dtype", AnyBuffer(&s32_buffer), like_reference),
+      absl_testing::StatusIs(absl::StatusCode::kInvalidArgument,
+                             HasSubstr("expected dtype f32 but got s32")));
+
+  int64_t wrong_rank_dims[] = {6};
+  XLA_FFI_Buffer wrong_rank_buffer = MakeBuffer(
+      F32, absl::MakeSpan(matching_storage), absl::MakeSpan(wrong_rank_dims));
+  ASSERT_OK(Verify("runtime_rank_replaced_by_dims",
+                   AnyBuffer(&wrong_rank_buffer),
+                   m::Buffer().WithShapeOf(reference).WithDims(6)));
+
+  EXPECT_THAT(
+      Verify("wrong_rank", AnyBuffer(&wrong_rank_buffer), like_reference),
+      absl_testing::StatusIs(absl::StatusCode::kInvalidArgument,
+                             HasSubstr("expected rank 2 but got 1")));
+
+  int64_t wrong_shape_dims[] = {3, 2};
+  XLA_FFI_Buffer wrong_shape_buffer = MakeBuffer(
+      F32, absl::MakeSpan(matching_storage), absl::MakeSpan(wrong_shape_dims));
+  EXPECT_THAT(
+      Verify("wrong_shape", AnyBuffer(&wrong_shape_buffer), like_reference),
+      absl_testing::StatusIs(
+          absl::StatusCode::kInvalidArgument,
+          HasSubstr("expected dimension 0 to be 2 but got 3")));
 }
 
 TEST(FfiTest, BufferMatchingCompositionIsOrderIndependent) {
@@ -1645,6 +1779,30 @@ void BM_MatchPrebuiltAnyBuffer(benchmark::State& state) {
 }
 
 BENCHMARK(BM_MatchPrebuiltAnyBuffer);
+
+//===----------------------------------------------------------------------===//
+// BM_VerifyLikeAnyBuffer
+//===----------------------------------------------------------------------===//
+
+void BM_VerifyLikeAnyBuffer(benchmark::State& state) {
+  namespace m = ::xla::ffi::match;
+
+  std::vector<float> storage(1, 0.0f);
+  int64_t dims[] = {1, 1, 1, 1};
+  XLA_FFI_Buffer c_buffer =
+      MakeBuffer(F32, absl::MakeSpan(storage), absl::MakeSpan(dims));
+  AnyBuffer buffer(&c_buffer);
+
+  CHECK_OK(Verify("buffer", buffer, m::Buffer().Like(buffer)));
+  for (auto _ : state) {
+    auto pattern = m::Buffer().Like(buffer);
+    benchmark::DoNotOptimize(pattern);
+    absl::Status status = Verify("buffer", buffer, pattern);
+    benchmark::DoNotOptimize(status);
+  }
+}
+
+BENCHMARK(BM_VerifyLikeAnyBuffer);
 
 //===----------------------------------------------------------------------===//
 // BM_MatchAnyBuffer

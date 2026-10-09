@@ -327,6 +327,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
       kDefaultReduceScatterCombineThreshold);
   opts.set_xla_gpu_collective_permute_combine_threshold_bytes(
       kDefaultCollectivePermuteCombineThreshold);
+  opts.set_xla_while_loop_all_reduce_dus_code_motion_max_size_bytes(10240);
   opts.set_xla_gpu_collective_combine_threshold_count(
       kDefaultCollectiveCombineThresholdCount);
   opts.set_xla_gpu_enable_all_gather_combine_by_dim(false);
@@ -438,7 +439,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
 
   opts.set_xla_gpu_experimental_enable_fusion_block_level_rewriter(false);
 
-  opts.set_xla_gpu_match_tpu_precision(false);
+  opts.set_xla_gpu_default_to_alg_dot_bf16_bf16_f32(false);
   opts.set_xla_gpu_enable_libnvptxcompiler(
       stream_executor::IsLibNvPtxCompilerSupported());
   opts.set_xla_gpu_libnvjitlink_mode(DebugOptions::LIB_NV_JIT_LINK_MODE_AUTO);
@@ -513,6 +514,8 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_gpu_experimental_collective_start_as_early_as_possible(false);
   opts.set_xla_gpu_experimental_enable_selective_memcpy_overlap(false);
   opts.set_xla_gpu_experimental_parallel_async_compute_limit(2);
+  opts.set_xla_gpu_experimental_scheduler_memory_fencing_threshold_bytes(-1);
+  opts.set_xla_gpu_experimental_scheduler_memory_fencing_slack_windows(1);
   opts.set_xla_pjrt_allow_auto_layout_in_hlo(false);
   opts.set_xla_gpu_enable_scatter_determinism_expander(false);
   opts.set_xla_gpu_unsupported_enable_all_reduce_decomposer(false);
@@ -1965,17 +1968,14 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       debug_options->xla_gpu_force_compilation_parallelism(),
       "Overrides normal multi-threaded compilation setting to use this many "
       "threads. Setting to 0 (the default value) means no enforcement."));
-  flag_list->push_back(
-      tsl::Flag("xla_gpu_default_to_alg_dot_bf16_bf16_f32",
-                bool_setter_for(&DebugOptions::set_xla_gpu_match_tpu_precision),
-                debug_options->xla_gpu_match_tpu_precision(),
-                "Deprecated. Use `xla_gpu_match_tpu_precision` instead."));
+
   flag_list->push_back(tsl::Flag(
-      "xla_gpu_match_tpu_precision",
-      bool_setter_for(&DebugOptions::set_xla_gpu_match_tpu_precision),
-      debug_options->xla_gpu_match_tpu_precision(),
+      "xla_gpu_default_to_alg_dot_bf16_bf16_f32",
+      bool_setter_for(
+          &DebugOptions::set_xla_gpu_default_to_alg_dot_bf16_bf16_f32),
+      debug_options->xla_gpu_default_to_alg_dot_bf16_bf16_f32(),
       "Use the dot precision algorithm `ALG_DOT_BF16_BF16_F32 by default for "
-      "f32 dots. This leads to the same precision as on TPU."));
+      "f32 dots."));
   flag_list->push_back(
       tsl::Flag("xla_gpu_deterministic_ops",
                 bool_setter_for(&DebugOptions::set_xla_gpu_deterministic_ops),
@@ -2329,6 +2329,15 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       "Amount of padding the redzone allocator will put on one side of each "
       "buffer it allocates. (So the buffer's total size will be increased by "
       "2x this value.)"));
+  flag_list->push_back(tsl::Flag(
+      "xla_while_loop_all_reduce_dus_code_motion_max_size_bytes",
+      int64_setter_for(
+          &DebugOptions::
+              set_xla_while_loop_all_reduce_dus_code_motion_max_size_bytes),
+      debug_options->xla_while_loop_all_reduce_dus_code_motion_max_size_bytes(),
+      "Maximum size (in bytes) of an all-reduce that the while-loop all-reduce "
+      "code motion pass is allowed to hoist out of a loop for dynamic update "
+      "slice patterns."));
   flag_list->push_back(tsl::Flag(
       "xla_gpu_shape_checks", setter_for_xla_gpu_shape_checks,
       DebugOptions::ShapeChecks_Name(debug_options->xla_gpu_shape_checks()),
@@ -3152,6 +3161,27 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       "This controls how many in-flight asynchronous computations "
       "latency hiding scheduler can schedule."));
   flag_list->push_back(tsl::Flag(
+      "xla_gpu_experimental_scheduler_memory_fencing_threshold_bytes",
+      int64_setter_for(
+          &DebugOptions::
+              // NOLINTNEXTLINE
+          set_xla_gpu_experimental_scheduler_memory_fencing_threshold_bytes),
+      debug_options
+          ->xla_gpu_experimental_scheduler_memory_fencing_threshold_bytes(),
+      "Buffers of at least this size in bytes are fenced by the "
+      "SchedulerMemoryFencing pass. -1 disables the pass, 0 uses 1% of the "
+      "scheduler memory limit, and positive values are capped at the scheduler "
+      "memory limit."));
+  flag_list->push_back(tsl::Flag(
+      "xla_gpu_experimental_scheduler_memory_fencing_slack_windows",
+      int32_setter_for(
+          &DebugOptions::
+              set_xla_gpu_experimental_scheduler_memory_fencing_slack_windows),
+      debug_options
+          ->xla_gpu_experimental_scheduler_memory_fencing_slack_windows(),
+      "How many async operation windows the users of a fenced buffer may be "
+      "deferred past the buffer's last-use window in the pre-LHS schedule."));
+  flag_list->push_back(tsl::Flag(
       "xla_pjrt_allow_auto_layout_in_hlo",
       bool_setter_for(&DebugOptions::set_xla_pjrt_allow_auto_layout_in_hlo),
       debug_options->xla_pjrt_allow_auto_layout_in_hlo(),
@@ -3803,6 +3833,9 @@ FlagStatus GetFlagStatus(absl::string_view flag_name) {
 
 void ResetThreadLocalFuel() {
   absl::call_once(flags_init, &AllocateFlags, nullptr);
+  if (initial_fuel->empty()) {
+    return;
+  }
 
   thread_fuel = std::make_unique<
       absl::node_hash_map<std::string, std::atomic<int64_t>>>();
@@ -3814,6 +3847,9 @@ void ResetThreadLocalFuel() {
 
 bool PassFuelIsSet(absl::string_view pass) {
   absl::call_once(flags_init, &AllocateFlags, nullptr);
+  if (initial_fuel->empty()) {
+    return false;
+  }
   auto* fuel_pool = thread_fuel ? thread_fuel.get() : global_fuel;
   auto it = fuel_pool->find(pass);
   return it != fuel_pool->end();
@@ -3823,6 +3859,9 @@ bool ConsumeFuel(absl::string_view pass, bool* just_ran_out) {
   absl::call_once(flags_init, &AllocateFlags, nullptr);
   if (just_ran_out != nullptr) {
     *just_ran_out = false;
+  }
+  if (initial_fuel->empty()) {
+    return true;
   }
   auto* fuel_pool = thread_fuel ? thread_fuel.get() : global_fuel;
   if (fuel_pool->empty()) {

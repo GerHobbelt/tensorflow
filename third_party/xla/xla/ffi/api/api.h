@@ -1233,6 +1233,27 @@ class BufferPatternBase {
     return BufferPatternBase<WithDTypeSet, Ranks>(*this);
   }
 
+  // Constrains the complete shape to match `buffer`.
+  template <typename Buffer>
+  auto WithShapeOf(Buffer buffer) const {
+    using Pattern = BufferPatternBase<DTypes, RankSet<>>;
+    Pattern pattern(*this);
+    auto dimensions = buffer.dimensions();
+    pattern.rank_ = dimensions.size();
+    pattern.dimensions_.assign(dimensions.begin(), dimensions.end());
+    return pattern;
+  }
+
+  // Constrains the dtype and complete shape to match `buffer`.
+  template <typename Buffer>
+  auto Like(Buffer buffer) const {
+    auto shape = WithShapeOf(buffer);
+    using Pattern = BufferPatternBase<DTypeSet<DType>, RankSet<>>;
+    Pattern pattern(shape);
+    pattern.dtype_ = buffer.element_type();
+    return pattern;
+  }
+
   // Constrains every dimension positionally and deduces the type-level rank
   // from the number of arguments.
   template <typename... Args,
@@ -1266,8 +1287,19 @@ class BufferPatternBase {
       return false;
     }
 
+    if (dtype_.has_value() && buffer.element_type() != *dtype_) {
+      os << "expected dtype " << ValuePrinter<DType>{*dtype_} << " but got "
+         << ValuePrinter<DType>{buffer.element_type()};
+      return false;
+    }
+
     auto dimensions = buffer.dimensions();
     if (!RankValues<Ranks>::Match(dimensions.size(), os)) {
+      return false;
+    }
+
+    if (rank_.has_value() && dimensions.size() != *rank_) {
+      os << "expected rank " << *rank_ << " but got " << dimensions.size();
       return false;
     }
 
@@ -1319,9 +1351,15 @@ class BufferPatternBase {
       os << " with ";
       DTypeValues<DTypes>::DescribeTo(os);
     }
+    if (dtype_.has_value()) {
+      os << " with dtype " << ValuePrinter<DType>{*dtype_};
+    }
     if (!RankValues<Ranks>::empty()) {
       os << " with ";
       RankValues<Ranks>::DescribeTo(os);
+    }
+    if (rank_.has_value()) {
+      os << " with rank " << *rank_;
     }
     if (!dimensions_.empty()) {
       os << " with dimensions [";
@@ -1342,8 +1380,23 @@ class BufferPatternBase {
   template <typename OtherDTypes, typename OtherRanks>
   explicit BufferPatternBase(
       const BufferPatternBase<OtherDTypes, OtherRanks>& other)
-      : dimensions_(other.dimensions_) {}
+      : dtype_(other.dtype_),
+        rank_(other.rank_),
+        dimensions_(other.dimensions_) {
+    // A constraint has either a type-level or runtime representation, never
+    // both. Type-changing modifiers replace the corresponding runtime value.
+    if constexpr (DTypes::size() != 0) {
+      dtype_.reset();
+    }
+    if constexpr (Ranks::size() != 0) {
+      rank_.reset();
+    }
+  }
 
+  // Runtime constraints copied from another buffer. Each is present only when
+  // the corresponding type-level set is empty.
+  std::optional<DType> dtype_;
+  std::optional<size_t> rank_;
   // Positional dimension constraints. Unconstrained positions (the gaps left by
   // WithDim) hold a catch-all DimPattern that matches any extent.
   std::vector<DimPattern> dimensions_;
@@ -1471,7 +1524,7 @@ struct AttrDecoding;
 //   struct CtxDecoding<MyType> {
 //    using Type = <handler argument type for context type MyType>;
 //    static std::optional<Type> Decode(const XLA_FFI_Api* api,
-//                                      XLA_FFI_ExecutionContext* ctx);
+//                                      XLA_FFI_InvokeContext* ctx);
 //   }
 //
 template <typename T>
@@ -1489,7 +1542,7 @@ struct CtxDecoding;
 //   template<ExecutionStage stage>
 //   struct ResultEncoding<stage, absl::Status> {
 //     XLA_FFI_Error* Encode(const XLA_FFI_Api* api,
-//                           XLA_FFI_ExecutionContext* ctx,
+//                           XLA_FFI_InvokeContext* ctx,
 //                           absl::Status status) {...}
 //   };
 //
@@ -1508,7 +1561,7 @@ struct CtxDecoding;
 //   template<ExecutionStage stage>
 //   struct ResultEncoding<state, xla::ffi::Future> {
 //     std::variant<XLA_FFI_Error*, XLA_FFI_Future*> Encode(
-//       const XLA_FFI_Api* api, XLA_FFI_ExecutionContext* ctx,
+//       const XLA_FFI_Api* api, XLA_FFI_InvokeContext* ctx,
 //       xla::ffi::Future future) {...}
 //   };
 //
@@ -1707,6 +1760,52 @@ struct Decode<CtxTag<T>> {
 };
 
 }  // namespace internal
+
+//===----------------------------------------------------------------------===//
+// Decoding for Extensions
+//===----------------------------------------------------------------------===//
+
+// Type tag for decoding an Extension.
+template <typename T>
+struct FfiExtension {};
+
+// Context decoding for an Extension.
+//
+// Example: Ffi::Bind().Ctx<FFIExtension<MyExtension>>()
+//                     .To([](const MyExtension* ext) { ... });
+template <typename T>
+struct CtxDecoding<FfiExtension<T>> {
+  using Type = const T*;
+
+  static std::optional<Type> Decode(const XLA_FFI_Api* api,
+                                    XLA_FFI_InvokeContext* ctx,
+                                    DiagnosticEngine& diagnostic) {
+    XLA_FFI_InvokeContext_FindExtension_Args args;
+    args.struct_size = XLA_FFI_InvokeContext_FindExtension_Args_STRUCT_SIZE;
+    args.extension_start = nullptr;
+    args.ctx = ctx;
+    args.extension_type = T::kExtensionType;
+    args.extension = nullptr;
+
+    XLA_FFI_Error* error = api->XLA_FFI_InvokeContext_FindExtension(&args);
+    if (error != nullptr) {
+      diagnostic.Emit("Failed to find extension: ")
+          << internal::GetErrorMessage(api, error);
+      internal::DestroyError(api, error);
+      return std::nullopt;
+    }
+
+    if (args.extension == nullptr) {
+      diagnostic.Emit("Extension not found in context");
+      return std::nullopt;
+    }
+
+    // args.extension_type is a contract that guarantees that the extension is
+    // of type T.
+    // NOLINTNEXTLINE
+    return reinterpret_cast<Type>(args.extension);
+  }
+};
 
 //===----------------------------------------------------------------------===//
 // Type-safe wrapper for accessing a variable number of arguments.
@@ -1911,6 +2010,32 @@ struct internal::Decode<internal::AttrsTag<T>> {
 };
 
 //===----------------------------------------------------------------------===//
+// Helpers for creating and reading extensions.
+//===----------------------------------------------------------------------===//
+
+// Creates an extension header for a given extension struct.
+// Eg:
+// struct MyExtension {
+//   static constexpr int64_t kExtensionType = 1234;
+//   XLA_FFI_Extension extension_base;
+//   int32_t my_data;
+// };
+// ...
+// MyExtension ext;
+// ext.extension_base = MakeExtensionHeader<MyExtension>();
+template <typename T>
+inline XLA_FFI_Extension MakeExtensionHeader() {
+  return XLA_FFI_Extension{
+      /*.struct_size=*/sizeof(T),
+      /*.id=*/
+      XLA_FFI_ExtensionId{/*extension_type=*/T::kExtensionType,
+                          /*major_version=*/T::kMajorVersion,
+                          /*minor_version=*/T::kMinorVersion},
+      /*.next=*/nullptr,
+  };
+}
+
+//===----------------------------------------------------------------------===//
 // Type-safe wrapper for accessing context.
 //===----------------------------------------------------------------------===//
 
@@ -1918,11 +2043,11 @@ namespace internal {
 
 class ContextBase {
  public:
-  ContextBase(const XLA_FFI_Api* api, XLA_FFI_ExecutionContext* ctx)
+  ContextBase(const XLA_FFI_Api* api, XLA_FFI_InvokeContext* ctx)
       : api_(api), ctx_(ctx) {}
 
   const XLA_FFI_Api* api() const { return api_; }
-  XLA_FFI_ExecutionContext* ctx() const { return ctx_; }
+  XLA_FFI_InvokeContext* ctx() const { return ctx_; }
 
  protected:
   template <typename T>
@@ -1933,7 +2058,7 @@ class ContextBase {
 
  private:
   const XLA_FFI_Api* api_;
-  XLA_FFI_ExecutionContext* ctx_;
+  XLA_FFI_InvokeContext* ctx_;
 };
 
 }  // namespace internal

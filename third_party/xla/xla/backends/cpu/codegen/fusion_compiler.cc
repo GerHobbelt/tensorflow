@@ -314,6 +314,7 @@ void AddBufferizationPasses(mlir::OpPassManager& pm) {
 
   mlir::bufferization::buildBufferDeallocationPipeline(
       pm, mlir::bufferization::BufferDeallocationPipelineOptions());
+  pm.addNestedPass<mlir::func::FuncOp>(cpu::createHoistAllocaPass());
 }
 
 }  //  namespace
@@ -390,6 +391,10 @@ void AddXtileToVectorPasses(mlir::OpPassManager& pm) {
   AddBufferizationPasses(pm);
 
   pm.addPass(cpu::createLinalgElementwiseToVectorPass());
+
+  // For lowering of complex loops.
+  pm.addPass(mlir::createConvertLinalgToLoopsPass());
+  pm.addPass(mlir::createConvertComplexToStandardPass());
 
   pm.addPass(mlir::memref::createFoldMemRefAliasOpsPass());
   pm.addPass(mlir::createCanonicalizerPass());

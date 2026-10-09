@@ -534,7 +534,6 @@ cc_library(
     compatible_with = get_compatible_with_portable(),
     copts = tflite_copts(),
     deps = [
-        ":op_macros",
         "//tensorflow/lite:array",
         "//tensorflow/lite:kernel_api",
         "//tensorflow/lite:util",
@@ -781,6 +780,9 @@ BUILTIN_KERNEL_DEPS = [
     ":control_flow_common",
     "@eigen_archive//:eigen3",
     "@flatbuffers",
+    "@com_google_absl//absl/algorithm:container",
+    "@com_google_absl//absl/base:nullability",
+    "@com_google_absl//absl/container:inlined_vector",
     "@com_google_absl//absl/types:span",
     "//tensorflow/lite:framework_stable",
     "//tensorflow/lite:minimal_logging",
@@ -1184,6 +1186,7 @@ cc_test(
     deps = [
         ":test_main",
         ":test_util",
+        "//tensorflow/lite/core/c:c_api_types",
         "//tensorflow/lite/schema:schema_fbs",
         "@com_google_googletest//:gtest",
         "@flatbuffers",
@@ -1896,6 +1899,8 @@ cc_test(
         ":reduce_test_common",
         ":test_main",
         ":test_util",
+        "//tensorflow/lite/c:c_api_types",
+        "//tensorflow/lite/c:common",
         "//tensorflow/lite/schema:schema_fbs",
         "@com_google_googletest//:gtest",
         "@flatbuffers",
@@ -3385,7 +3390,7 @@ cc_test(
     name = "unsorted_segment_min_test",
     size = "small",
     srcs = [
-        "unsorted_segment_sum_test.cc",
+        "unsorted_segment_min_test.cc",
         "unsorted_segment_test.cc",
         "unsorted_segment_test.h",
     ],

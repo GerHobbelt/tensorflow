@@ -48,6 +48,7 @@ limitations under the License.
 #include "xla/pjrt/dynamic_shapes.h"
 #include "xla/pjrt/pjrt_client.h"
 #include "xla/pjrt/raw_buffer.h"
+#include "xla/pjrt/raw_pjrt_client.h"
 #include "xla/pjrt/transpose.h"
 #include "xla/runtime/device_id.h"
 #include "xla/shape.h"
@@ -493,27 +494,7 @@ class CommonPjRtClient : public PjRtClient {
       TransposePlanCache(1024);
 };
 
-// Represents the launch state for a loaded executable. This state must be
-// reconstructed each time we want to launch the executable.
-class PjRtRawLoadedExecutable {
- public:
-  virtual ~PjRtRawLoadedExecutable() = default;
 
-  virtual PjRtDevice* device() = 0;
-
-  struct RawExecuteResult {
-    std::optional<tsl::Future<>> future;
-    PjRtDeviceEventRef primary_execute_event;
-    absl::Status inline_status;
-  };
-  virtual RawExecuteResult Execute(const ExecuteOptions& options,
-                                   absl::Span<const PjRtRawBufferRef> inputs,
-                                   absl::Span<const PjRtRawBufferRef> results,
-                                   PjRtDeviceEventRefVector extra_deps,
-                                   PjRtDeviceEventRefVector control_deps,
-                                   bool is_predetermined_error,
-                                   bool fill_future) && = 0;
-};
 
 class CommonPjRtLoadedExecutable : public PjRtLoadedExecutable {
  public:
@@ -699,6 +680,15 @@ class CommonPjRtLoadedExecutable : public PjRtLoadedExecutable {
     return GetExecutable()->FingerprintExecutable();
   }
 
+  // Invoked once per device at the top of ExecuteLaunch (phase 2 of the
+  // two-phase launch). The hook must be thread-safe: it may be called
+  // concurrently from per-device launch threads. Must not be set concurrently
+  // with Execute. Intended for tests that need to observe which devices reach
+  // phase 2.
+  void SetExecuteLaunchHookForTesting(std::function<void(PjRtDevice*)> hook) {
+    execute_launch_hook_ = std::move(hook);
+  }
+
  protected:
   // Execute is split into Prepare and Launch.
   // Prepare can fail and be retried, while Launch is guaranteed to succeed.
@@ -714,13 +704,7 @@ class CommonPjRtLoadedExecutable : public PjRtLoadedExecutable {
     const ExecuteOptions* options;
   };
 
-  struct DeviceAndAssignment {
-    PjRtDevice* device;
-    std::shared_ptr<DeviceAssignment> device_assignment;
-    std::optional<int32_t> slice_id;
-    int replica;
-    int partition;
-  };
+  using DeviceAndAssignment = PjRtExecutableLoadState::DeviceAndAssignment;
 
   virtual absl::StatusOr<DeviceAndAssignment> LookupDeviceAndAssignment(
       const ExecuteOptions& options, int replica, int partition,
@@ -797,6 +781,8 @@ class CommonPjRtLoadedExecutable : public PjRtLoadedExecutable {
   std::shared_ptr<DeviceAssignment> device_assignment_;
 
   std::unique_ptr<DispatchInfo::Extras> extras_;
+
+  std::function<void(PjRtDevice*)> execute_launch_hook_;
 };
 
 class CommonPjRtRawBufferImpl : public PjRtRawBuffer {
