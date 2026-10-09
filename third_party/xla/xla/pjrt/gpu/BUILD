@@ -88,6 +88,7 @@ cc_library(
         "//xla/core/collectives:communicator",
         "//xla/core/collectives:rank_id",
         "//xla/hlo/builder:xla_computation",
+        "//xla/hlo/ir:hlo",
         "//xla/pjrt:async_work_runner",
         "//xla/pjrt:common_pjrt_client",
         "//xla/pjrt:device_event",
@@ -156,6 +157,7 @@ cc_library(
         "//xla/tsl/framework:bfc_allocator",
         "//xla/tsl/framework:device_id",
         "//xla/tsl/framework:device_id_impl",
+        "//xla/tsl/framework:scoped_allocation_trace",
         "//xla/tsl/lib/strings:proto_serialization",
         "//xla/tsl/platform:env",
         "//xla/tsl/platform:errors",
@@ -200,6 +202,7 @@ cc_library(
         "//xla:debug_options_flags",
         "//xla/service/gpu:gpu_compiler",
         "//xla/service/gpu:gpu_executable",
+        "//xla/service/gpu:gpu_executable_buffer_allocator",
         "//xla/service/gpu:stream_executor_util",
     ]) + if_cuda([
         # keep sorted
@@ -215,6 +218,7 @@ cc_library(
         "//xla:debug_options_flags",
         "//xla/service/gpu:gpu_compiler",
         "//xla/service/gpu:gpu_executable",
+        "//xla/service/gpu:gpu_executable_buffer_allocator",
         "//xla/service/gpu:stream_executor_util",
         "@local_config_sycl//sycl:sycl_headers",
     ]),
@@ -257,6 +261,22 @@ cc_library(
         "@com_google_googletest//:gtest_for_library",
     ],
     alwayslink = 1,
+)
+
+xla_test(
+    name = "pjrt_client_test_gpu",
+    srcs = ["pjrt_client_test_gpu.cc"],
+    backends = ["gpu"],
+    tags = [
+        "multi_gpu",
+        "no_oss",
+    ],
+    deps = [
+        ":se_gpu_pjrt_client",
+        ":se_gpu_pjrt_client_test_lib",
+        "//xla/pjrt:pjrt_client_test_common",
+        "//xla/tsl/platform:test_main",
+    ],
 )
 
 xla_test(

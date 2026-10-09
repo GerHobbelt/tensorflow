@@ -590,6 +590,7 @@ cc_library(
         ":test_util",
         ":user_context",
         "//xla:shape_util",
+        "//xla:xla_data_proto_cc",
         "//xla/pjrt:pjrt_layout",
         "//xla/tsl/concurrency:future",
         "//xla/tsl/concurrency:ref_count",
@@ -662,6 +663,7 @@ cc_library(
     deps = [
         ":ifrt",
         ":test_util",
+        "//xla/tsl/concurrency:future",
         "//xla/tsl/concurrency:ref_count",
         "//xla/tsl/platform:test",
         "@com_google_absl//absl/algorithm:container",

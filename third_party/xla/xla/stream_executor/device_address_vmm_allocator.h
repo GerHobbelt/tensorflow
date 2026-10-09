@@ -21,6 +21,7 @@ limitations under the License.
 #include <functional>
 #include <memory>
 #include <optional>
+#include <utility>
 
 #include "absl/base/thread_annotations.h"
 #include "absl/container/flat_hash_map.h"
@@ -140,6 +141,19 @@ class DeviceAddressVmmAllocator : public DeviceAddressAllocator {
     // this device. Defaults to unlimited.
     uint64_t pa_budget = UINT64_MAX;
   };
+
+  // Creates a platform-appropriate VMM allocator for the given devices,
+  // dispatching to the CUDA or ROCm implementation based on the build platform.
+  // The pa_budget for each device is computed from `memory_fraction` (or
+  // overridden by `gpu_system_memory_size` when set). Returns an error on
+  // platforms without a VMM implementation.
+  //
+  // Defined in device_address_vmm_allocator_factory.cc so this base library
+  // does not depend on the platform-specific subclasses.
+  static absl::StatusOr<std::unique_ptr<DeviceAddressVmmAllocator>> Create(
+      const Platform* platform, double memory_fraction,
+      std::optional<int64_t> gpu_system_memory_size,
+      absl::Span<const std::pair<StreamExecutor*, Stream*>> devices);
 
   ~DeviceAddressVmmAllocator() override;
 
@@ -292,6 +306,112 @@ class DeviceAddressVmmAllocator : public DeviceAddressAllocator {
     MemoryReservation::ScopedMapping scoped_mapping;
   };
 
+  // Lifetime record for one raw physical allocation. The initial migration adds
+  // this next to the existing maps; later changes move allocator and
+  // reservation address ownership into this record.
+  //
+  // TODO(b/44173): Add transition methods as allocator and reservation
+  // bookkeeping migrate to AllocationRecord. Callers should not directly mutate
+  // record state because allocator-address and reservation-address lifetimes
+  // must move through active/stale/completed states consistently.
+  class AllocationRecord {
+   public:
+    enum class Kind {
+      kAllocate,
+      kAllocateAndMapReturnMapAddr,
+      kAllocateAndMapReturnNewAddr,
+    };
+
+    enum class AllocatorState {
+      kActive,
+      kStale,
+    };
+
+    enum class ReservationState {
+      kNone,
+      kActive,
+      kStale,
+    };
+
+    AllocationRecord(
+        Kind kind, DeviceAddressBase allocator_address,
+        std::shared_ptr<MemoryAllocation> raw_allocation,
+        std::unique_ptr<MemoryReservation> allocator_address_reservation,
+        MemoryReservation::ScopedMapping allocator_address_mapping,
+        bool multi_device);
+    AllocationRecord(const AllocationRecord&) = delete;
+    AllocationRecord& operator=(const AllocationRecord&) = delete;
+    AllocationRecord(AllocationRecord&&) = default;
+    AllocationRecord& operator=(AllocationRecord&&) = default;
+
+    Kind kind() const { return kind_; }
+    DeviceAddressBase allocator_address() const { return allocator_address_; }
+    void* allocator_key() const { return allocator_address_.opaque(); }
+    bool allocator_active() const {
+      return allocator_state_ == AllocatorState::kActive;
+    }
+    bool allocator_stale() const {
+      return allocator_state_ == AllocatorState::kStale;
+    }
+    bool allocator_matches(DeviceAddressBase address) const {
+      return allocator_address_.IsSameAs(address);
+    }
+    uint64_t allocator_stale_seqno() const { return allocator_stale_seqno_; }
+    bool multi_device() const { return multi_device_; }
+    MemoryAllocation* raw_allocation() const { return raw_allocation_.get(); }
+    MemoryReservation* allocator_address_reservation() const {
+      return allocator_address_reservation_.get();
+    }
+    bool has_allocator_address_mapping() const {
+      return allocator_address_mapping_.has_value();
+    }
+
+    bool has_reservation_alias() const {
+      return reservation_state_ != ReservationState::kNone;
+    }
+    bool reservation_active() const {
+      return reservation_state_ == ReservationState::kActive;
+    }
+    bool reservation_stale() const {
+      return reservation_state_ == ReservationState::kStale;
+    }
+    bool has_reservation_address() const {
+      return reservation_address_.has_value();
+    }
+    DeviceAddressBase reservation_address() const;
+    void* reservation_key() const { return reservation_address().opaque(); }
+    bool reservation_matches(DeviceAddressBase address) const {
+      return has_reservation_address() &&
+             reservation_address_->IsSameAs(address);
+    }
+    uint64_t reservation_stale_seqno() const {
+      return reservation_stale_seqno_;
+    }
+    bool reservation_mapping_matches(DeviceAddressBase address) const;
+
+   private:
+    Kind kind_;
+    DeviceAddressBase allocator_address_;
+    std::shared_ptr<MemoryAllocation> raw_allocation_;
+    bool multi_device_;
+
+    // Present for Allocate() and
+    // Allocate(..., return_reservation_address=false).
+    std::unique_ptr<MemoryReservation> allocator_address_reservation_;
+    // Present while the allocator address is active or stale.
+    std::optional<MemoryReservation::ScopedMapping> allocator_address_mapping_;
+
+    // Present while a reservation alias is active or stale.
+    std::optional<DeviceAddressBase> reservation_address_;
+    std::optional<MemoryReservation::ScopedMapping>
+        reservation_address_mapping_;
+
+    AllocatorState allocator_state_ = AllocatorState::kActive;
+    ReservationState reservation_state_ = ReservationState::kNone;
+    uint64_t allocator_stale_seqno_ = 0;
+    uint64_t reservation_stale_seqno_ = 0;
+  };
+
   struct PerDeviceState {
     StreamExecutor* executor;
     Stream* stream;
@@ -331,6 +451,8 @@ class DeviceAddressVmmAllocator : public DeviceAddressAllocator {
         ABSL_GUARDED_BY(mu);
     absl::flat_hash_map<void*, bool> multi_device_allocations
         ABSL_GUARDED_BY(mu);
+    absl::flat_hash_map<void*, std::unique_ptr<AllocationRecord>>
+        records_by_allocator_address ABSL_GUARDED_BY(mu);
     absl::flat_hash_map<void*, ReservationMapping> active_reservation_mappings
         ABSL_GUARDED_BY(mu);
     absl::flat_hash_map<void*, ReservationMapping> stale_reservation_mappings
@@ -365,9 +487,9 @@ class DeviceAddressVmmAllocator : public DeviceAddressAllocator {
                                                    uint64_t seqno) = 0;
 
  private:
-  // Returns pointer into per_device_ map; null if device_ordinal not
-  // registered. No lock needed — per_device_ is read-only after construction.
-  PerDeviceState* GetPerDeviceState(int device_ordinal) const;
+  // Returns pointer into per_device_ map, or NotFound if device_ordinal is not
+  // registered. No lock needed: per_device_ is read-only after construction.
+  absl::StatusOr<PerDeviceState*> GetPerDeviceState(int device_ordinal) const;
 
   // Validates a caller-owned reservation slice and returns the corresponding
   // DeviceAddressBase.
