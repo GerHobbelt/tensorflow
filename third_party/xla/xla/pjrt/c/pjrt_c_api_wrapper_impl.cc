@@ -929,9 +929,14 @@ PJRT_Error* PJRT_AsyncHostToDeviceTransferManager_TransferLiteral(
       pjrt::BuildXlaShapeFromC(args->shape_element_type, args->shape_dims,
                                args->shape_num_dims, args->shape_layout));
 
-  auto literal = std::make_unique<xla::BorrowingLiteral>(
-      static_cast<const char*>(args->data), shape);
-  xla::BorrowingLiteral* literal_ptr = literal.get();
+  std::unique_ptr<xla::LiteralBase> literal;
+  if (shape.IsToken()) {
+    literal = std::make_unique<xla::Literal>(shape);
+  } else {
+    literal = std::make_unique<xla::BorrowingLiteral>(
+        static_cast<const char*>(args->data), shape);
+  }
+  xla::LiteralBase* literal_ptr = literal.get();
 
   auto [promise, future] = xla::MakePromise();
   absl::AnyInvocable<void() &&> on_done_with_d2h_transfer =
@@ -2296,6 +2301,12 @@ PJRT_Error* PJRT_LoadedExecutable_Execute(
         args->options->multi_slice_config->config.get();
   }
   options.use_major_to_minor_data_layout_for_callbacks = true;
+  if (args->options->struct_size >=
+      PJRT_STRUCT_SIZE(PJRT_ExecuteOptions,
+                       use_major_to_minor_data_layout_for_callbacks)) {
+    options.use_major_to_minor_data_layout_for_callbacks =
+        args->options->use_major_to_minor_data_layout_for_callbacks;
+  }
   if (args->options->num_non_donatable_input_indices > 0) {
     for (int i = 0; i < args->options->num_non_donatable_input_indices; ++i) {
       options.non_donatable_input_indices.insert(

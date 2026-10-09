@@ -74,9 +74,8 @@ class PjRtStreamExecutorDeviceEventSet : public PjRtDeviceEventSet {
 
   void AppendTo(
       std::vector<tsl::RCReference<tsl::AsyncValue>>& events) override;
+  void AppendTo(std::vector<PjRtDeviceEventRef>& events) override;
   void AppendTo(PjRtDeviceEventSet& events) override;
-
-  std::unique_ptr<PjRtDeviceEventSet> Clone() const override;
 
   const absl::flat_hash_set<BufferSequencingEvent*>& events() const {
     return events_;
@@ -150,7 +149,7 @@ class PjRtStreamExecutorRawBuffer : public CommonPjRtRawBufferImpl {
 
   void ScheduleCopyTo(
       AsyncWorkRunner* async_work_runner,
-      std::vector<tsl::RCReference<tsl::AsyncValue>> transfer_dependency_avs,
+      std::vector<PjRtDeviceEventRef> transfer_dependency_events,
       PjRtRawBufferRef dst_raw_buffer,
       tsl::RCReference<PjRtDeviceEventPromise> definition_event_promise,
       tsl::RCReference<PjRtDeviceEventPromise> src_usage_event_promise,
@@ -164,10 +163,7 @@ class PjRtStreamExecutorRawBuffer : public CommonPjRtRawBufferImpl {
       std::vector<tsl::RCReference<tsl::AsyncValue>> transfer_dependency_avs)
       override;
 
-  void DecrefAfter(
-      std::vector<tsl::RCReference<tsl::AsyncValue>> avs) override {
-    DropRef();
-  }
+  void DecrefAfter(std::vector<PjRtDeviceEventRef> avs) override { DropRef(); }
 
  private:
   PjRtStreamExecutorClient* client_;
@@ -177,7 +173,7 @@ class PjRtStreamExecutorRawBuffer : public CommonPjRtRawBufferImpl {
   size_t buffer_size_;
 
   void IntraClientCopyToWithDependencies(
-      std::vector<tsl::RCReference<tsl::AsyncValue>> dependencies,
+      std::vector<PjRtDeviceEventRef> dependencies,
       PjRtRawBufferRef dst_raw_buffer,
       tsl::RCReference<PjRtDeviceEventPromise> definition_event_promise,
       tsl::RCReference<PjRtDeviceEventPromise> src_usage_event_promise,
