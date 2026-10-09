@@ -28,7 +28,9 @@ def get_cub_sort_kernel_types(name = ""):
         "u16_b32",
         "u16_b64",
         "u32_b16",
+        "s32_b16",
         "s32_b32",
+        "s32_b64",
         "u32_b32",
         "u32_b64",
         "u64_b16",
@@ -40,24 +42,6 @@ def get_cub_sort_kernel_types(name = ""):
         "f32_b16",
         "f32_b32",
         "f32_b64",
-    ]
-
-def get_cub_prefix_sum_kernel_types(name = ""):
-    """ List of supported types for CUB prefix sum kernels.
-    """
-    return [
-        "bf16",
-        "f16",
-        "f32",
-        "f64",
-        "s8",
-        "s16",
-        "s32",
-        "s64",
-        "u8",
-        "u16",
-        "u32",
-        "u64",
     ]
 
 def gen_gpu_hlo_compile_tests(

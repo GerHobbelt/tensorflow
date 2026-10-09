@@ -595,7 +595,6 @@ xla_test(
 
 xla_test(
     name = "conv_depthwise_backprop_filter_test",
-    timeout = "long",
     srcs = ["conv_depthwise_backprop_filter_test.cc"],
     shard_count = 50,
     tags = ["nozapfhahn"],  # TODO: b/445492433 - Re-enable when it doesn't time out.
@@ -603,11 +602,7 @@ xla_test(
         ":hlo_pjrt_interpreter_reference_mixin",
         ":hlo_pjrt_test_base",
         "//xla:error_spec",
-        "//xla:execution_options_util",
-        "//xla:status_macros",
-        "//xla/hlo/builder:xla_computation",
         "//xla/hlo/testlib:test",
-        "//xla/hlo/transforms:despecializer",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
@@ -3573,16 +3568,15 @@ xla_test(
     srcs = ["test_utils_test.cc"],
     # There is nothing backend specific in this test, so just pick an arbitrary backend.
     backends = ["cpu"],
-    use_legacy_runtime = True,
     deps = [
-        ":local_client_test_base",
+        ":hlo_pjrt_test_base",
         ":test_utils",
         ":xla_internal_test_main",
         "//xla:literal",
         "//xla:shape_util",
         "//xla/hlo/builder:xla_builder",
         "//xla/hlo/ir:hlo",
-        "//xla/hlo/parser:hlo_parser",
+        "//xla/service:hlo_runner_interface",
         "//xla/tsl/lib/core:status_test_util",
         "//xla/tsl/platform:statusor",
         "//xla/tsl/platform:test",

@@ -13,21 +13,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_STREAM_EXECUTOR_CUDA_CUB_PREFIX_SUM_KERNEL_CUDA_H_
-#define XLA_STREAM_EXECUTOR_CUDA_CUB_PREFIX_SUM_KERNEL_CUDA_H_
+#ifndef XLA_CODEGEN_TILING_EXPERIMENTAL_SCHEDULING_H_
+#define XLA_CODEGEN_TILING_EXPERIMENTAL_SCHEDULING_H_
 
-#include <cstddef>
+#include "absl/status/statusor.h"
+#include "xla/codegen/tiling/experimental/tiled_hlo.h"
+#include "xla/hlo/analysis/indexing_map.h"
 
-#include "third_party/gpus/cuda/include/cuda.h"
-#include "third_party/gpus/cuda/include/driver_types.h"
+namespace xla::gpu::experimental {
 
-namespace stream_executor::cuda {
+// Returns a map from pid to the tile indices.
+absl::StatusOr<IndexingMap> Schedule(
+    const TiledHloComputation& tiled_computation);
 
-template <typename KeyT>
-cudaError_t CubPrefixSum(void* d_temp_storage, size_t& temp_bytes,
-                         const void* d_in, void* d_out, size_t num_items,
-                         CUstream stream);
+}  // namespace xla::gpu::experimental
 
-}  // namespace stream_executor::cuda
-
-#endif  // XLA_STREAM_EXECUTOR_CUDA_CUB_PREFIX_SUM_KERNEL_CUDA_H_
+#endif  // XLA_CODEGEN_TILING_EXPERIMENTAL_SCHEDULING_H_

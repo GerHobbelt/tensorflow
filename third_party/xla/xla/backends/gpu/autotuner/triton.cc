@@ -72,8 +72,13 @@ std::vector<TritonGemmConfig> GetDefaultTritonConfigs(
   auto* cuda_compute_capability = compute_capability.cuda_compute_capability();
   std::vector<TritonGemmConfig> configs;
 
-  if (cuda_compute_capability->IsAtLeastBlackwell()) {
+  if (cuda_compute_capability->IsBlackwell()) {
+    // SM 10.0 (datacenter: B200, B100)
     configs = GetTritonConfigsForPlatform(TritonConfigsPlatform::kBlackwell);
+  } else if (cuda_compute_capability->IsAtLeastBlackwell()) {
+    // SM 11.0+ / 12.0+ (consumer: RTX 5090, etc.)
+    configs =
+        GetTritonConfigsForPlatform(TritonConfigsPlatform::kBlackwellConsumer);
   } else if (cuda_compute_capability->IsHopper()) {
     configs = GetTritonConfigsForPlatform(TritonConfigsPlatform::kHopper);
   } else if (cuda_compute_capability->IsAmpere()) {
@@ -114,6 +119,13 @@ TritonBackend::GetSupportedConfigs(const HloInstruction& instr) {
       hlo_query::GetFirstInstructionWithOpcode(
           *instr.fused_instructions_computation(), HloOpcode::kScaledDot);
   if (scaled_dot_instr != nullptr) {
+    // Triton scaled dot emitter is not supported on ROCm; skip to allow
+    // other backends (e.g. HipblasLtBackend) to handle kScaledDot.
+    const auto& gpu_cc =
+        target_config().device_description.gpu_compute_capability();
+    if (gpu_cc.IsRocm()) {
+      return std::vector<std::unique_ptr<BackendConfig>>();
+    }
     return GetSupportedConfigsForScaledDot(scaled_dot_instr);
   }
   return std::vector<std::unique_ptr<BackendConfig>>();
