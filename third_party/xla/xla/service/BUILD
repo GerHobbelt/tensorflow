@@ -1756,7 +1756,7 @@ cc_library(
     visibility = internal_visibility([
         "//xla/internal:hwi_internal",
         "//xla/backends/gpu/runtime:__subpackages__",
-        "//xla/service/gpu/tests:__pkg__",
+        "//xla/backends/gpu/tests:__pkg__",
         "//third_party/pathways/configuration:__subpackages__",
     ]),
     deps = [
@@ -2424,31 +2424,6 @@ xla_cc_test(
     ],
 )
 
-cc_library(
-    name = "scatter_determinism_expander",
-    srcs = ["scatter_determinism_expander.cc"],
-    hdrs = ["scatter_determinism_expander.h"],
-    deps = [
-        ":hlo_creation_utils",
-        ":scatter_utils",
-        "//xla:array",
-        "//xla:array2d",
-        "//xla:comparison_util",
-        "//xla:literal_util",
-        "//xla:shape_util",
-        "//xla:util",
-        "//xla:xla_data_proto_cc",
-        "//xla/hlo/ir:hlo",
-        "//xla/hlo/transforms/expanders:op_expander_pass",
-        "//xla/tsl/platform:statusor",
-        "@com_google_absl//absl/algorithm:container",
-        "@com_google_absl//absl/container:flat_hash_set",
-        "@com_google_absl//absl/log:check",
-        "@com_google_absl//absl/strings:str_format",
-        "@com_google_absl//absl/types:span",
-    ],
-)
-
 xla_cc_test(
     name = "scatter_expander_test",
     srcs = ["scatter_expander_test.cc"],
@@ -2464,25 +2439,6 @@ xla_cc_test(
         "//xla/hlo/utils:hlo_matchers",
         "//xla/tests:xla_internal_test_main",
         "//xla/tsl/lib/core:status_test_util",
-    ],
-)
-
-xla_test(
-    name = "scatter_determinism_expander_test",
-    srcs = ["scatter_determinism_expander_test.cc"],
-    backends = [
-        "cpu",
-        "gpu",
-    ],
-    deps = [
-        ":scatter_determinism_expander",
-        "//xla:literal",
-        "//xla:shape_util",
-        "//xla/hlo/testlib:test",
-        "//xla/tests:hlo_pjrt_test_base",
-        "//xla/tests:xla_internal_test_main",
-        "//xla/tsl/platform:statusor",
-        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -3319,9 +3275,8 @@ xla_test(
     backends = ["gpu"],
     deps = [
         ":hlo_module_config",
-        "//xla/hlo/ir:hlo",
+        "//xla/backends/gpu/tests:gpu_pjrt_codegen_test",
         "//xla/hlo/testlib:test",
-        "//xla/service/gpu/tests:gpu_pjrt_codegen_test",
         "//xla/tests:xla_internal_test_main",
     ],
 )
@@ -6546,7 +6501,10 @@ tf_proto_library(
     name = "gpu_topology_proto",
     srcs = ["gpu_topology.proto"],
     visibility = ["//visibility:public"],
-    deps = ["//xla/stream_executor:device_description_proto"],
+    deps = [
+        "//xla/service/cpu:executable_proto",
+        "//xla/stream_executor:device_description_proto",
+    ],
 )
 
 cc_library(
@@ -6566,6 +6524,7 @@ cc_library(
     ]),
     deps = [
         ":gpu_topology_proto_cc",
+        "//xla/backends/cpu:target_machine_options",
         "//xla/backends/gpu/target_config",
         "//xla/tsl/platform:status_macros",
         "@com_google_absl//absl/log:check",
@@ -6581,6 +6540,8 @@ xla_cc_test(
     srcs = ["gpu_topology_test.cc"],
     deps = [
         ":gpu_topology",
+        "//xla/backends/cpu:target_machine_options",
+        "//xla/tsl/util/proto:proto_matchers",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:status_matchers",
         "@com_google_googletest//:gtest_main",

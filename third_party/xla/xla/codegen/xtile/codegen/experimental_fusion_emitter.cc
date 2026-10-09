@@ -16,7 +16,6 @@ limitations under the License.
 #include "xla/codegen/xtile/codegen/experimental_fusion_emitter.h"
 
 #include <cstdint>
-#include <iostream>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -41,15 +40,16 @@ limitations under the License.
 #include "mlir/IR/TypeUtilities.h"
 #include "mlir/IR/Types.h"
 #include "mlir/IR/Value.h"
+#include "mlir/Interfaces/FunctionInterfaces.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Support/LLVM.h"
+#include "stablehlo/dialect/StablehloOps.h"
 #include "xla/codegen/tiling/experimental/scheduling.h"
 #include "xla/codegen/tiling/experimental/tiled_hlo.h"
 #include "xla/codegen/xtile/codegen/emitter_helpers.h"
 #include "xla/codegen/xtile/ir/transforms/passes.h"
 #include "xla/codegen/xtile/ir/xtile_ops.h"
 #include "xla/hlo/analysis/indexing_map.h"
-#include "xla/hlo/analysis/indexing_map_serialization.h"
 #include "xla/hlo/ir/hlo_computation.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_instructions.h"
@@ -61,13 +61,14 @@ limitations under the License.
 #include "xla/tools/hlo_decomposer.h"
 #include "xla/tsl/framework/mlir/status_scoped_diagnostic_handler.h"
 #include "xla/tsl/platform/errors.h"
-#include "xla/tsl/platform/statusor.h"
 #include "xla/xla_data.pb.h"
+#include "xla/tsl/platform/status_macros.h"
 
 namespace xla::xtile {
 namespace {
 
 using ::llvm::SmallVector;
+using ::mlir::ArrayRef;
 using ::mlir::FunctionOpInterface;
 using ::mlir::ImplicitLocOpBuilder;
 using ::mlir::Location;
@@ -77,6 +78,20 @@ using ::mlir::Value;
 using ::stream_executor::GpuComputeCapability;
 
 namespace ge = ::xla::gpu::experimental;
+
+TensorValue EmitTranspose(mlir::ImplicitLocOpBuilder& b,
+                          ArrayRef<int64_t> tile_sizes,
+                          ArrayRef<int64_t> dimensions, TensorValue input) {
+  SmallVector<int64_t> padded_tile_sizes = GetPaddedTileSizes(tile_sizes);
+
+  Type input_element_type = input.getType().getElementType();
+  Type output_tensor_type =
+      mlir::RankedTensorType::get(padded_tile_sizes, input_element_type);
+
+  mlir::DenseI64ArrayAttr order = b.getDenseI64ArrayAttr(dimensions);
+  return ::mlir::stablehlo::TransposeOp::create(b, output_tensor_type, input,
+                                                order);
+}
 
 absl::StatusOr<TensorValue> EmitTiledHloInstruction(
     ImplicitLocOpBuilder& b, const HloFusionInstruction* fusion,
@@ -97,8 +112,8 @@ absl::StatusOr<TensorValue> EmitTiledHloInstruction(
       arg_index = hlo->parameter_number();  // Nested operands are parameters.
       hlo = instr->operand(arg_index);
     }
-    TF_ASSIGN_OR_RETURN(TileInfo tile_info,
-                        TileInfo::Construct(b, pid, tiled_hlo, schedule));
+    ASSIGN_OR_RETURN(TileInfo tile_info,
+                     TileInfo::Construct(b, pid, tiled_hlo, schedule));
     TensorValue parameter =
         EmitParameterExtract(b, tile_info, fn.getArgument(arg_index));
 
@@ -108,9 +123,8 @@ absl::StatusOr<TensorValue> EmitTiledHloInstruction(
     // loading if the type of the loaded parameter does not match what is
     // expected.
     Type loaded_element_type = getElementTypeOrSelf(parameter.getType());
-    TF_ASSIGN_OR_RETURN(
-        Type expected_element_type,
-        PrimitiveTypeToMlirType(b, hlo->shape().element_type()));
+    ASSIGN_OR_RETURN(Type expected_element_type,
+                     PrimitiveTypeToMlirType(b, hlo->shape().element_type()));
 
     if (expected_element_type != loaded_element_type) {
       // Ensure that we didn't mess up somewhere else by checking that we
@@ -127,18 +141,35 @@ absl::StatusOr<TensorValue> EmitTiledHloInstruction(
 
     return parameter;
   }
-
-  if (hlo->IsElementwise()) {
-    std::vector<Value> operands;
-    operands.reserve(hlo->operands().size());
-
-    for (const ge::TiledHloInstruction* operand : tiled_hlo.operands()) {
-      operands.push_back(values[operand]);
+  if (hlo->opcode() == HloOpcode::kConstant) {
+    if (ShapeUtil::IsEffectiveScalar(hlo->shape())) {
+      return EmitConstant(b, *hlo);
     }
-    TF_ASSIGN_OR_RETURN(Value result, EmitElementwise(b, *hlo, operands));
+    return absl::UnimplementedError(
+        absl::StrCat("Unsupported non-scalar constant ", hlo->ToString()));
+  }
+  std::vector<Value> operands;
+  operands.reserve(hlo->operands().size());
+  for (const ge::TiledHloInstruction* operand : tiled_hlo.operands()) {
+    operands.push_back(values[operand]);
+  }
+  if (hlo->IsElementwise()) {
+    ASSIGN_OR_RETURN(Value result, EmitElementwise(b, *hlo, operands));
     return mlir::cast<TensorValue>(result);
   }
 
+  switch (hlo->opcode()) {
+    case HloOpcode::kTranspose: {
+      ASSIGN_OR_RETURN(auto static_tile_sizes,
+                       tiled_hlo.tile().GetStaticTileSizes());
+      auto padded_tile_sizes = GetPaddedTileSizes(static_tile_sizes);
+      return EmitTranspose(b, padded_tile_sizes, hlo->dimensions(),
+                           mlir::cast<TensorValue>(operands[0]));
+    }
+    default:
+      return absl::UnimplementedError(
+          absl::StrCat("Unsupported operation ", hlo->ToString()));
+  }
   return absl::UnimplementedError(
       absl::StrCat("Unsupported operation ", hlo->ToString()));
 }
@@ -151,9 +182,9 @@ absl::StatusOr<std::vector<TensorValue>> EmitTiledComputation(
   VLOG(2) << "EmitTiledComputation: " << tiled_computation.ToString();
   for (const auto& tiled_hlo : tiled_computation.tiled_hlo_instructions()) {
     const HloInstruction* hlo = tiled_hlo->hlo();
-    TF_ASSIGN_OR_RETURN(TensorValue result,
-                        EmitTiledHloInstruction(b, fusion, *tiled_hlo, schedule,
-                                                fn, pid, values));
+    ASSIGN_OR_RETURN(TensorValue result,
+                     EmitTiledHloInstruction(b, fusion, *tiled_hlo, schedule,
+                                             fn, pid, values));
     TF_RET_CHECK(values.insert({tiled_hlo.get(), result}).second)
         << hlo->ToString();
     VLOG(8) << "Emitted " << hlo->ToString(HloPrintOptions::ShortParsable());
@@ -181,9 +212,9 @@ absl::Status EmitGeneric(
   absl::flat_hash_map<const gpu::experimental::TiledHloInstruction*,
                       TensorValue>
       values;
-  TF_ASSIGN_OR_RETURN(
-      auto results, EmitTiledComputation(b, fusion, tiled_computation, schedule,
-                                         fn, tile_id, values));
+  ASSIGN_OR_RETURN(auto results,
+                   EmitTiledComputation(b, fusion, tiled_computation, schedule,
+                                        fn, tile_id, values));
   const HloComputation* computation = fusion->fused_instructions_computation();
   for (const auto& [root, result, arg] :
        llvm::zip(tiled_computation.roots(), results,
@@ -199,8 +230,8 @@ absl::Status EmitGeneric(
       result = mlir::cast<TensorValue>(Cast(b, result, result_storage_type));
     }
 
-    TF_ASSIGN_OR_RETURN(auto tile_info,
-                        TileInfo::Construct(b, tile_id, *root, schedule));
+    ASSIGN_OR_RETURN(auto tile_info,
+                     TileInfo::Construct(b, tile_id, *root, schedule));
 
     xtile::InsertTileOp::create(b, result, arg, tile_info.offsets(),
                                 tile_info.padded_tile_sizes(),
@@ -232,8 +263,8 @@ absl::StatusOr<mlir::OwningOpRef<mlir::ModuleOp>> EmitXTileModule(
   b.setInsertionPointToEnd(xtile_module->getBody());
 
   // Compute function argument types.
-  TF_ASSIGN_OR_RETURN(SmallVector<Type> fn_arg_types,
-                      GetFnArgTypes(b, fusion, opaque_args_types, gpu_cc));
+  ASSIGN_OR_RETURN(SmallVector<Type> fn_arg_types,
+                   GetFnArgTypes(b, fusion, opaque_args_types, gpu_cc));
   // Metadata arguments are opaque to the tiling infra.
   llvm::SmallVector<mlir::NamedAttribute> named_attributes{b.getNamedAttr(
       "num_opaque_args", b.getI32IntegerAttr(opaque_args_types.size()))};
@@ -243,7 +274,7 @@ absl::StatusOr<mlir::OwningOpRef<mlir::ModuleOp>> EmitXTileModule(
   fn.addEntryBlock();
   b.setInsertionPointToStart(&fn.front());
 
-  TF_ASSIGN_OR_RETURN(auto schedule, Schedule(tiled_computation));
+  ASSIGN_OR_RETURN(auto schedule, Schedule(tiled_computation));
   TF_RETURN_IF_ERROR(
       EmitGeneric(b, fusion, tiled_computation, schedule, fn, &mlir_context));
 
