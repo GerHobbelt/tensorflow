@@ -19,14 +19,44 @@ package_group(
 )
 
 #===-------------------------------------------------------------------------------------------===//
-# Runtime tracing libraries
+# Runtime support libraries
 #===-------------------------------------------------------------------------------------------===//
 
 cc_library(
-    name = "thunk_runtime_dependencies",
-    # Register GPU collectives plugin.
-    deps = ["//xla/backends/gpu/collectives:gpu_collectives_plugin"],
+    name = "event_pool",
+    srcs = ["event_pool.cc"],
+    hdrs = ["event_pool.h"],
+    deps = [
+        "//xla/runtime:object_pool",
+        "//xla/stream_executor:event",
+        "//xla/stream_executor:stream_executor_h",
+        "@com_google_absl//absl/status:statusor",
+    ],
 )
+
+cc_library(
+    name = "while_loop",
+    srcs = ["while_loop.cc"],
+    hdrs = ["while_loop.h"],
+    deps = [
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+xla_cc_test(
+    name = "while_loop_test",
+    srcs = ["while_loop_test.cc"],
+    deps = [
+        ":while_loop",
+        "@com_google_absl//absl/strings",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+#===-------------------------------------------------------------------------------------------===//
+# Runtime tracing libraries
+#===-------------------------------------------------------------------------------------------===//
 
 cc_library(
     name = "annotation",
@@ -131,6 +161,7 @@ cc_library(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/types:span",
         "@tsl//tsl/profiler/lib:scoped_annotation",
     ],
@@ -362,6 +393,12 @@ xla_test(
 #===-------------------------------------------------------------------------------------------===//
 
 cc_library(
+    name = "thunk_runtime_dependencies",
+    # Register GPU collectives plugin.
+    deps = ["//xla/backends/gpu/collectives:gpu_collectives_plugin"],
+)
+
+cc_library(
     name = "async_execution",
     srcs = ["async_execution.cc"],
     hdrs = ["async_execution.h"],
@@ -553,6 +590,7 @@ cc_library(
         ":command_state",
         ":sequential_thunk",  # build_cleaner: keep
         ":thunk",
+        "//xla:util",
         "//xla/service:buffer_assignment",  # build_cleaner: keep
         "//xla/service/gpu:buffer_allocations",  # build_cleaner: keep
         "//xla/stream_executor:command_buffer",
@@ -1680,7 +1718,6 @@ cc_library(
         "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
-        "@llvm-project//llvm:Support",
     ],
 )
 
@@ -1696,8 +1733,10 @@ xla_test(
     backends = ["h100"],
     deps = [
         ":collective_clique_requests",
+        ":collective_cliques",
         ":collective_kernel_thunk",
         ":collective_memory",
+        ":collective_memory_cache",
         ":collective_memory_requests",
         ":collective_params",
         ":collective_thunk",
@@ -1706,6 +1745,8 @@ xla_test(
         "//xla:shape_util",
         "//xla:util",
         "//xla:xla_data_proto_cc",
+        "//xla/backends/gpu/collectives:gpu_clique_key",
+        "//xla/backends/gpu/runtime:collective_execution",
         "//xla/core/collectives:reduction_kind",
         "//xla/runtime:device_id",
         "//xla/service:buffer_assignment",
@@ -2185,6 +2226,7 @@ cc_library(
     # copybara:uncomment compatible_with = ["//buildenv/target:non_prod"],
     deps = [
         ":collective_cliques",
+        ":collective_memory_cache",
         ":collective_memory_requests",
         ":collective_params",
         "//xla:util",
@@ -2201,6 +2243,7 @@ cc_library(
         "//xla/stream_executor/gpu:multicast_memory",
         "//xla/tsl/platform:status_macros",
         "//xla/tsl/util:safe_reinterpret_cast",
+        "//xla/tsl/util:tied_ref",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/container:btree",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -2235,6 +2278,20 @@ cc_library(
         "@com_google_absl//absl/container:inlined_vector",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/types:span",
+    ],
+)
+
+cc_library(
+    name = "collective_memory_cache",
+    srcs = ["collective_memory_cache.cc"],
+    hdrs = ["collective_memory_cache.h"],
+    compatible_with = get_compatible_with_portable(),
+    deps = [
+        "//xla/core/collectives:symmetric_memory",
+        "//xla/stream_executor/gpu:multicast_memory",
+        "//xla/tsl/util:tied_ref",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/synchronization",
     ],
 )
 
@@ -2826,7 +2883,7 @@ cc_library(
     hdrs = ["thunk_executor.h"],
     deps = [
         ":annotation",
-        ":collective_thunk",
+        ":event_pool",
         ":thunk",
         ":while_loop",
         "//xla:util",
@@ -2859,6 +2916,8 @@ xla_test(
         ":sequential_thunk",
         ":thunk",
         ":thunk_executor",
+        ":while_loop",
+        ":while_thunk",
         "//xla:shape_util",
         "//xla:xla_data_proto_cc",
         "//xla/service:buffer_assignment",
@@ -2874,6 +2933,7 @@ xla_test(
         "//xla/stream_executor:stream_executor_h",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:string_view",
         "@com_google_googletest//:gtest",
         "@com_google_googletest//:gtest_main",
     ],
@@ -2967,26 +3027,6 @@ xla_cc_test(
         "@com_google_absl//absl/log:check",
         "@com_google_googletest//:gtest_main",
         "@com_google_protobuf//:protobuf",
-    ],
-)
-
-cc_library(
-    name = "while_loop",
-    srcs = ["while_loop.cc"],
-    hdrs = ["while_loop.h"],
-    deps = [
-        "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/types:span",
-    ],
-)
-
-xla_cc_test(
-    name = "while_loop_test",
-    srcs = ["while_loop_test.cc"],
-    deps = [
-        ":while_loop",
-        "@com_google_absl//absl/strings",
-        "@com_google_googletest//:gtest_main",
     ],
 )
 
@@ -3257,20 +3297,52 @@ cc_library(
         "//xla/service:collective_ops_utils",
         "//xla/service/gpu:launch_dimensions",
         "//xla/stream_executor:device_address",
+        "//xla/stream_executor:device_description",
         "//xla/stream_executor:stream",
         "//xla/stream_executor/gpu:all_reduce_kernel",
         "//xla/stream_executor/gpu:collective_kernel_metadata",
         "//xla/stream_executor/gpu:gpu_kernel_registry",
-        "//xla/tsl/platform:statusor",
+        "//xla/tsl/platform:errors",
         "//xla/tsl/util:safe_reinterpret_cast",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/base",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/types:span",
         "@llvm-project//llvm:Support",
+    ],
+)
+
+xla_cc_test(
+    name = "all_reduce_build_info_test",
+    srcs = ["all_reduce_build_info_test.cc"],
+    deps = [
+        ":all_reduce",
+        "//xla:shape_util",
+        "//xla:util",
+        "//xla:xla_data_proto_cc",
+        "//xla/core/collectives:reduction_kind",
+        "//xla/hlo/ir:hlo",
+        "//xla/hlo/testlib:hlo_hardware_independent_test_base",
+        "//xla/service/gpu:gpu_constants",
+        "//xla/service/gpu:gpu_device_info_for_tests",
+        "//xla/stream_executor:device_description",
+        "//xla/stream_executor/gpu:all_reduce_kernel",
+        "//xla/stream_executor/host:host_platform",
+        "//xla/tsl/lib/gtl:int_type",
+        "//xla/tsl/platform:statusor",
+        "//xla/tsl/platform:test",
+        "//xla/tsl/platform:test_main",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:status_matchers",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_googletest//:gtest",
     ],
 )
 
@@ -3635,7 +3707,6 @@ cc_library(
         "//xla/stream_executor:stream",
         "//xla/stream_executor:stream_executor_h",
         "//xla/tsl/platform:errors",
-        "//xla/tsl/platform:status_macros",
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -3818,7 +3889,6 @@ cc_library(
         "//xla/service/gpu:backend_configs_cc",
         "//xla/stream_executor:stream",
         "//xla/tsl/platform:errors",
-        "//xla/tsl/platform:status_macros",
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",

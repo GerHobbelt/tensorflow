@@ -90,11 +90,6 @@ class CoordinationService {
     // worker can disconnect individually.
     absl::Duration shutdown_barrier_timeout = absl::ZeroDuration();
 
-    // If a task restarts with a new incarnation, we may allow it to reconnect
-    // silently. This is useful when we know that a task can immediately resume
-    // work upon re-connecting to the service.
-    bool allow_new_incarnation_to_reconnect = false;
-
     // If true, a job can continue running even if some tasks have failed, and
     // tasks are allowed to rejoin. If false, tasks share fate. As soon as one
     // task fails, all tasks are permanently failed.
@@ -114,6 +109,14 @@ class CoordinationService {
     absl::MutexLock lock(state_mu_);
     Stop();
   }
+
+  // CoordinationService is movable but not copyable.
+  CoordinationService(const CoordinationService&) = delete;
+  CoordinationService& operator=(const CoordinationService&) = delete;
+  CoordinationService(CoordinationService&&) = default;
+  CoordinationService& operator=(CoordinationService&&) = default;
+
+  IncarnationId GetServiceIncarnation() { return service_incarnation_; }
 
   // Register a task to the service.
   // Possible service errors:
@@ -283,11 +286,7 @@ class CoordinationService {
   void PollForErrorAsync(TaskId task, tsl::StatusCallback done);
 
  private:
-  friend class CoordinationServiceRpcHandler;
-
   void LogConnectStatusLocked() const ABSL_EXCLUSIVE_LOCKS_REQUIRED(state_mu_);
-
-  IncarnationId GetServiceIncarnation();
   void BarrierAsyncLocked(absl::string_view barrier_id, int64_t counter,
                           absl::Duration timeout, TaskId task,
                           const std::vector<TaskId>& participating_tasks,
@@ -416,12 +415,6 @@ class CoordinationService {
   // clients are not polling for error from the service, the service should stop
   // when there is an error. Otherwise, the service should not stop.
   bool IsClientPollingForError() const ABSL_EXCLUSIVE_LOCKS_REQUIRED(state_mu_);
-
-  // Checks if the barrier can be passed, if recoverable tasks reconnected or
-  // disconnected to the service while barrier is ongoing.
-  // This is only applicable if leave_barriers_on_recoverable_agent_restart flag
-  // is set to true.
-  void CheckBarrierStatusWithRecoverableTasks();
 
   // Returns a map of ongoing barriers to count of unsynced tasks waiting on
   // other barriers.
@@ -590,16 +583,6 @@ class CoordinationService {
   // The state of all pending GetAliveTasks calls.
   std::vector<AlivenessState> aliveness_states_ ABSL_GUARDED_BY(state_mu_);
 
-  // When the tasks connect to coordination service after cluster initialization
-  // is done, they will be added to this set.
-  // Tasks connecting after cluster initialization indicate that they
-  // reconnected to the service due to preemption or restart.
-  // Unsynced recoverable tasks will be excluded from the barrier check after
-  // the first cluster initialization.
-  // The service will remove them from the set when the tasks pass a
-  // barrier with other tasks.
-  absl::flat_hash_set<TaskId> unsynced_recoverable_jobs_
-      ABSL_GUARDED_BY(state_mu_);
   // Whether the agents are polling for error from the service. It will be set
   // to true when the service sees the first error polling request. Once set to
   // true, the value will never change back to false.
@@ -612,9 +595,6 @@ class CoordinationService {
   // the other state related to barriers and heartbeats to prevent illegal
   // memory access.
   std::unique_ptr<tsl::Thread> check_staleness_thread_;
-
-  CoordinationService(const CoordinationService&) = delete;
-  void operator=(const CoordinationService&) = delete;
 };
 
 }  // namespace xla
