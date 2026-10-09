@@ -237,6 +237,7 @@ cc_library(
         "//xla/stream_executor:stream_executor_h",
         "//xla/tsl/platform:errors",
         "//xla/tsl/platform:logging",
+        "//xla/tsl/platform:status_macros",
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
@@ -1002,6 +1003,7 @@ cc_library(
         "//xla/stream_executor/gpu:gpu_command_buffer",
         "//xla/tsl/platform:env",
         "//xla/tsl/platform:errors",
+        "//xla/tsl/platform:status_macros",
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/base",
         "@com_google_absl//absl/functional:any_invocable",
@@ -1332,6 +1334,7 @@ rocm_library(
     # copybara:uncomment compatible_with = ["//buildenv/target:non_prod"],
     tags = [
         "gpu",
+        "nofixdeps",
         "rocm-only",
     ],
     deps = [
@@ -1341,7 +1344,6 @@ rocm_library(
         "//xla/stream_executor/gpu:gpu_kernel_registry",
         "//xla/stream_executor/gpu:multi_gpu_barrier_kernel",
         "@com_google_absl//absl/base",
-        "@local_config_rocm//rocm:rocm_headers",
     ],
     alwayslink = 1,
 )
