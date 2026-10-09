@@ -18,6 +18,7 @@ limitations under the License.
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <new>
@@ -1638,6 +1639,42 @@ TEST(StreamExecutorGpuClientTest, CopyFromPinnedHostMemorySpace) {
                                      *literal));
 }
 
+namespace {
+
+class FailingHostMemoryAllocator : public HostMemoryAllocator {
+ public:
+  OwnedPtr Allocate(size_t size, const AllocateOptions& options) override {
+    return nullptr;
+  }
+};
+
+}  // namespace
+
+TEST(StreamExecutorGpuClientTest,
+     ToLiteralReturnsResourceExhaustedWhenHostStagingPoolIsFull) {
+  GpuClientOptions options = GetTestGpuClientOptions();
+  options.host_memory_allocator_factory =
+      [](HostMemoryAllocator::Options options)
+      -> absl::StatusOr<std::unique_ptr<HostMemoryAllocator>> {
+    return std::make_unique<FailingHostMemoryAllocator>();
+  };
+
+  ASSERT_OK_AND_ASSIGN(auto client, GetStreamExecutorGpuClient(options));
+  ASSERT_OK_AND_ASSIGN(
+      auto* device_memory_space,
+      client->addressable_devices()[0]->default_memory_space());
+
+  constexpr int64_t kTransferBytes = int64_t{1} << 20;
+  ASSERT_OK_AND_ASSIGN(
+      auto device_buffer,
+      client->CreateUninitializedBuffer(
+          ShapeUtil::MakeShape(U8, {kTransferBytes}), device_memory_space));
+
+  EXPECT_THAT(device_buffer->ToLiteral().Await(),
+              StatusIs(absl::StatusCode::kResourceExhausted,
+                       HasSubstr("host staging buffer")));
+}
+
 TEST(StreamExecutorGpuClientTest, CopyToPinnedHostMemorySpaceInt4) {
   TF_ASSERT_OK_AND_ASSIGN(
       auto client, GetStreamExecutorGpuClient(GetTestGpuClientOptions()));
@@ -3215,7 +3252,7 @@ constexpr char kAttrPlacedModule[] = R"(
     s = f32[512,1024] custom-call(t), custom_call_target="RecordBufferAddress",
       api_version=API_VERSION_TYPED_FFI,
       output_to_operand_aliasing={{}: (0, {})},
-      frontend_attributes={results_memory_spaces="{0:1}"}
+      frontend_attributes={results_memory_spaces="{0:7}"}
     ROOT r = f32[512,1024] add(s, s)
   })";
 
