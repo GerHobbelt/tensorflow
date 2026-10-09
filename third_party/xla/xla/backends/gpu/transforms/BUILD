@@ -306,6 +306,8 @@ cc_library(
         "//xla/codegen/xtile:xtile_config_proto_cc",
         "//xla/hlo/ir:hlo",
         "//xla/service/gpu:backend_configs_cc",
+        "//xla/stream_executor:device_description",
+        "//xla/stream_executor/cuda:cuda_compute_capability",
         "@com_google_absl//absl/status:statusor",
     ],
 )
@@ -382,6 +384,9 @@ xla_cc_test(
         "//xla/hlo/ir:hlo",
         "//xla/hlo/testlib:hlo_hardware_independent_test_base",
         "//xla/service/gpu:backend_configs_cc",
+        "//xla/service/gpu:gpu_device_info_for_tests",
+        "//xla/stream_executor:device_description",
+        "//xla/stream_executor/cuda:cuda_compute_capability",
         "@com_google_absl//absl/status:status_matchers",
         "@com_google_googletest//:gtest_main",  # fixdeps: keep
     ],
@@ -629,7 +634,7 @@ xla_test(
     srcs = ["conv_fp8_fallback_test.cc"],
     # All NVIDIA GPUs: the probe verdicts driving the pass differ per
     # generation. Every case is deviceless and opens no GPU, but needs a
-    # loadable cuDNN >= 9.8 runtime and a CUDA driver (cuDNN's deviceless
+    # loadable cuDNN >= 9.23 runtime and a CUDA driver (cuDNN's deviceless
     # heuristics abort without one), so GPU machines only.
     backends = ["gpu"],
     tags = [
@@ -1212,7 +1217,7 @@ xla_test(
     srcs = ["cudnn_fusion_compiler_deviceless_test.cc"],
     # All NVIDIA GPUs: the parity test checks the deviceless verdict against
     # live plan enumeration on each generation. The deviceless cases open no
-    # GPU, but they need a loadable cuDNN >= 9.8 runtime and a CUDA driver
+    # GPU, but they need a loadable cuDNN >= 9.23 runtime and a CUDA driver
     # (cuDNN's deviceless heuristics abort without one), so GPU machines only.
     backends = ["gpu"],
     tags = [
@@ -3126,6 +3131,7 @@ xla_test(
     name = "scatter_determinism_expander_test",
     srcs = ["scatter_determinism_expander_test.cc"],
     backends = ["gpu"],
+    shard_count = 3,
     deps = [
         ":scatter_determinism_expander",
         "//xla:literal",
@@ -3700,7 +3706,7 @@ xla_test(
         "gb300": ["broken"],  # TODO(b/505574653): re-enable when fixed.
     },
     backends = ["gpu"],
-    shard_count = 10,
+    shard_count = 15,
     deps = [
         ":topk_specializer",
         "//xla/backends/gpu/tests:hlo_pjrt_gpu_test_base",

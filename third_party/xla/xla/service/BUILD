@@ -5907,6 +5907,7 @@ xla_aot_compile_gpu(
     gpu_targets = [
         "h100",
         "b200",
+        "vr_nvl72",
     ],
     module = "xla_aot_compile_test.mlir",
     xla_flags = "--xla_gpu_use_new_autotune_cache_format=false",
@@ -5953,7 +5954,7 @@ xla_aot_compile_gpu(
         "b200",
     ],
     module = "xla_aot_compile_test_convolution.mlir",
-    xla_flags = "--xla_gpu_use_new_autotune_cache_format=true",
+    xla_flags = "--xla_gpu_use_new_autotune_cache_format=true --xla_gpu_experimental_enable_conv_fusion=true",
 )
 
 xla_aot_compile_gpu(
@@ -5964,7 +5965,22 @@ xla_aot_compile_gpu(
         "b200",
     ],
     module = "xla_aot_compile_test_convolution.mlir",
-    xla_flags = "--xla_gpu_use_new_autotune_cache_format=false",
+    xla_flags = "--xla_gpu_use_new_autotune_cache_format=false --xla_gpu_experimental_enable_conv_fusion=true",
+)
+
+xla_aot_compile_gpu(
+    name = "xla_aot_compile_test_gpu_executable_convolution_deviceless_cudnn",
+    # H100 only: deviceless conv graphs on Blackwell require cuDNN >= 9.19.
+    gpu_targets = [
+        "h100",
+        "h100_mig",
+    ],
+    module = "xla_aot_compile_test_convolution.mlir",
+    xla_flags = " ".join([
+        "--xla_gpu_experimental_enable_conv_fusion=true",
+        "--xla_gpu_cudnn_deviceless_compilation_mode=CUDNN_DEVICELESS_COMPILATION_AUTO",
+        "--xla_gpu_experimental_autotune_backends=cudnn",
+    ]),
 )
 
 xla_aot_compile_gpu_runtime_autotuning(
@@ -6048,6 +6064,7 @@ xla_test(
         ":xla_aot_compile_test_gpu_executable",
         ":xla_aot_compile_test_gpu_executable_constant",
         ":xla_aot_compile_test_gpu_executable_convolution",
+        ":xla_aot_compile_test_gpu_executable_convolution_deviceless_cudnn",
         ":xla_aot_compile_test_gpu_executable_convolution_legacy_cache",
         ":xla_aot_compile_test_gpu_executable_hlo",
         ":xla_aot_compile_test_gpu_executable_hlo_legacy_cache",
@@ -6063,7 +6080,8 @@ xla_test(
         ":hlo_runner_pjrt",
         "//xla:literal",
         "//xla:literal_util",
-        "//xla/tests:hlo_test_base",
+        "//xla/backends/gpu/tests:hlo_pjrt_gpu_test_base",
+        "//xla/stream_executor/cuda:cudnn_plugin",
         "//xla/tsl/platform:env",
         "//xla/tsl/platform:test",
         "@com_google_absl//absl/status:status_macros",

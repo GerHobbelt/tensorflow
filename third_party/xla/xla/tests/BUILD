@@ -1725,6 +1725,7 @@ xla_test(
         "b200",
     ],
     data = ["data/cudnn_reproducer.hlo"],
+    shard_count = 5,
     deps = [
         ":hlo_pjrt_interpreter_reference_mixin",
         "//xla:error_spec",
@@ -3071,7 +3072,7 @@ xla_test(
         "gpu",
         "interpreter",
     ],
-    shard_count = 30,
+    shard_count = 15,
     tags = ["optonly"],
     use_legacy_runtime = True,
     deps = [
@@ -3225,7 +3226,7 @@ xla_test(
         "gpu",
         "interpreter",
     ],
-    shard_count = 15,
+    shard_count = 8,
     use_legacy_runtime = True,
     deps = [
         ":literal_test_util",
@@ -3630,7 +3631,6 @@ xla_test(
         "//xla:xla_data_proto_cc",
         "//xla/hlo/builder:xla_builder",
         "//xla/tsl/lib/core:status_test_util",
-        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_googletest//:gtest",

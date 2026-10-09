@@ -152,9 +152,10 @@ absl::StatusOr<std::unique_ptr<Thunk>> DeserializeThunkProtoImpl(
           deserializer,
           gpu_topology.has_value() ? gpu_topology->num_devices_per_host() : 0);
     case ThunkProto::kConditionalThunk:
-      return ConditionalThunk::FromProto(std::move(thunk_info),
-                                         thunk_proto.conditional_thunk(),
-                                         buffer_allocations, deserializer);
+      return ConditionalThunk::FromProto(
+          std::move(thunk_info), thunk_proto.conditional_thunk(),
+          buffer_allocations, deserializer,
+          gpu_topology.has_value() ? gpu_topology->num_devices_per_host() : 0);
     case ThunkProto::kGemmThunk:
       return GemmThunk::FromProto(std::move(thunk_info),
                                   thunk_proto.gemm_thunk(), buffer_allocations);
@@ -190,20 +191,23 @@ absl::StatusOr<std::unique_ptr<Thunk>> DeserializeThunkProtoImpl(
           std::move(thunk_info), thunk_proto.cublas_lt_matmul_thunk(),
           buffer_allocations);
     case ThunkProto::kNormThunk:
-      return NormThunk::FromProto(std::move(thunk_info),
-                                  thunk_proto.norm_thunk(), buffer_allocations);
+      return NormThunk::FromProto(
+          std::move(thunk_info), thunk_proto.norm_thunk(), buffer_allocations,
+          gpu_topology.has_value() ? gpu_topology->num_devices_per_host() : 0);
     case ThunkProto::kConvolutionThunk:
-      return ConvolutionThunk::FromProto(std::move(thunk_info),
-                                         thunk_proto.convolution_thunk(),
-                                         buffer_allocations);
+      return ConvolutionThunk::FromProto(
+          std::move(thunk_info), thunk_proto.convolution_thunk(),
+          buffer_allocations,
+          gpu_topology.has_value() ? gpu_topology->num_devices_per_host() : 0);
     case ThunkProto::kConvolutionReorderThunk: {
       return ConvolutionReorderThunk::FromProto(
           std::move(thunk_info), thunk_proto.convolution_reorder_thunk(),
           buffer_allocations);
     }
     case ThunkProto::kFftThunk:
-      return FftThunk::FromProto(std::move(thunk_info), thunk_proto.fft_thunk(),
-                                 buffer_allocations);
+      return FftThunk::FromProto(
+          std::move(thunk_info), thunk_proto.fft_thunk(), buffer_allocations,
+          gpu_topology.has_value() ? gpu_topology->num_devices_per_host() : 0);
     case ThunkProto::kMemset32BitValueThunk:
       return Memset32BitValueThunk::FromProto(
           std::move(thunk_info), thunk_proto.memset32bit_value_thunk(),
@@ -326,9 +330,10 @@ absl::StatusOr<std::unique_ptr<Thunk>> DeserializeThunkProtoImpl(
           gpu_topology.has_value() ? gpu_topology->num_devices_per_process()
                                    : 0);
     case ThunkProto::kAsyncStartThunk:
-      return AsyncStartThunk::FromProto(std::move(thunk_info),
-                                        thunk_proto.async_start_thunk(),
-                                        deserializer, async_execution_map);
+      return AsyncStartThunk::FromProto(
+          std::move(thunk_info), thunk_proto.async_start_thunk(), deserializer,
+          async_execution_map,
+          gpu_topology.has_value() ? gpu_topology->num_devices_per_host() : 0);
     case ThunkProto::kAsyncDoneThunk:
       return AsyncDoneThunk::FromProto(std::move(thunk_info),
                                        thunk_proto.async_done_thunk(),

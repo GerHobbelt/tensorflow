@@ -110,6 +110,7 @@ limitations under the License.
 #include "xla/backends/gpu/transforms/double_buffer_loop_unrolling.h"
 #include "xla/backends/gpu/transforms/dus_accumulator_zero_init_elimination.h"
 #include "xla/backends/gpu/transforms/dynamic_slice_annotator.h"
+#include "xla/backends/gpu/transforms/dynamic_slice_copy.h"
 #include "xla/backends/gpu/transforms/dynamic_slice_copy_fusion_async_wrapper.h"
 #include "xla/backends/gpu/transforms/dynamic_slice_fusion_rewriter_v2.h"
 #include "xla/backends/gpu/transforms/estimate_cub_scan_scratch_size.h"
@@ -1411,10 +1412,9 @@ absl::Status RunLayoutAssignmentPasses(
   // Layout assignment uses alias analysis, which requires the call graph to
   // be flattened.
   pipeline.AddPass<FlattenCallGraph>();
-  ChannelLayoutConstraints layout_constraints;
   pipeline.AddPass<GpuLayoutAssignment>(
       hlo_module->mutable_entry_computation_layout(), gpu_version,
-      device_description, &layout_constraints);
+      device_description);
   // Run SubByteNormalization because GpuLayoutAssignment may modify a
   // Layout's element_size_in_bits field.
   pipeline.AddPass<SubByteNormalization>(
@@ -3239,9 +3239,7 @@ absl::Status GpuCompiler::RunPreSchedulingPasses(
   tsl::profiler::TraceMe traceme("RunPreSchedulingPasses");
   HloPassPipeline pipeline("pre-scheduling-passes");
   pipeline.AddPass<FusionWrapper>(gpu_device_info);
-  const auto* cuda_cc =
-      gpu_device_info.gpu_compute_capability().cuda_compute_capability();
-  if (cuda_cc != nullptr && cuda_cc->IsAtLeastAmpere()) {
+  if (SupportsDynamicSliceCopyThunks(gpu_device_info)) {
     pipeline.AddPass<DynamicSliceCopyFusionAsyncWrapper>();
   }
   // GpuCopyAsyncWrapper is disabled when xla_gpu_async_copy_min_bytes is -1.
