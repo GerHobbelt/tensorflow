@@ -13,29 +13,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "xla/backends/gpu/runtime/command.h"
+#include <gtest/gtest.h>
+#include "absl/strings/string_view.h"
+#include "xla/python/ifrt/test_util.h"
 
-#include <string>
+int main(int argc, char** argv) {
+  static constexpr absl::string_view kFilter =
+      // PjRt-IFRT does not implement `ReshardArrays`.
+      "-BundleImplTest.ReshardArrays";
+  xla::ifrt::test_util::SetTestFilterIfNotUserSpecified(kFilter);
 
-namespace xla::gpu {
-
-std::string CommandTypeString(CommandType type) {
-  switch (type) {
-#define CASE_CMD_STRING(enum_name, cmd_name, ...) \
-  case CommandType::enum_name:                    \
-    return cmd_name;
-    XLA_GPU_COMMAND_LIST(CASE_CMD_STRING)
-#undef CASE_CMD_STRING
-  }
+  testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
 }
-
-bool IsCollectiveCommand(CommandType type) {
-  switch (type) {
-    case CommandType::kCollectiveCmd:
-      return true;
-    default:
-      return false;
-  }
-}
-
-}  // namespace xla::gpu

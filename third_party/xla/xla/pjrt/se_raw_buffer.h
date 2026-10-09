@@ -63,33 +63,6 @@ class PjRtStreamExecutorDeviceEventPromise : public PjRtDeviceEventPromise {
   tsl::AsyncValueRef<BufferSequencingEvent> event_;
 };
 
-class PjRtStreamExecutorDeviceEventSet : public PjRtDeviceEventSet {
- public:
-  explicit PjRtStreamExecutorDeviceEventSet(size_t reservation) {
-    events_.reserve(reservation);
-  }
-
-  void AddEvent(PjRtDeviceEventRef event) override;
-  void AddEvent(const BufferSequencingEventRef& event);
-
-  void AppendTo(
-      std::vector<tsl::RCReference<tsl::AsyncValue>>& events) override;
-  void AppendTo(std::vector<PjRtDeviceEventRef>& events) override;
-  void AppendTo(PjRtDeviceEventSet& events) override;
-
-  const absl::flat_hash_set<BufferSequencingEvent*>& events() const {
-    return events_;
-  }
-
-  std::vector<BufferSequencingEventRef> event_refs() && {
-    return std::move(event_refs_);
-  }
-
- private:
-  absl::flat_hash_set<BufferSequencingEvent*> events_;
-  std::vector<BufferSequencingEventRef> event_refs_;
-};
-
 class PjRtStreamExecutorRawBuffer : public CommonPjRtRawBufferImpl {
  public:
   PjRtStreamExecutorRawBuffer(
@@ -135,12 +108,6 @@ class PjRtStreamExecutorRawBuffer : public CommonPjRtRawBufferImpl {
 
   absl::StatusOr<PjRtRawBufferRef> Slice(int64_t offset, int64_t size) override;
 
-  void ReadDynamicShape(tsl::AsyncValueRef<xla::Shape> output_shape,
-                        xla::Shape shape) override;
-
-  absl::StatusOr<PjRtRawBufferRef> RemoveDynamicShapeMetadataIfPresent(
-      const xla::Shape& device_shape, const xla::Shape& logical_shape) override;
-
   void CopyToLiteralAsync(
       Promise<> promise,
       tsl::RCReference<PjRtDeviceEventPromise> device_promise,
@@ -158,8 +125,8 @@ class PjRtStreamExecutorRawBuffer : public CommonPjRtRawBufferImpl {
       tsl::RCReference<PjRtDeviceEventPromise> definition_event_promise,
       tsl::RCReference<PjRtDeviceEventPromise> src_usage_event_promise,
       ::tsl::AsyncValueRef<bool> allocation_event) override;
-  tsl::AsyncValue* GetRawBufferAsyncValue() override {
-    return device_buffer_.GetAsyncValue();
+  PjRtDeviceEventPtr GetRawBufferAsyncValue() override {
+    return PjRtDeviceEventPtr::FromAsyncValue(device_buffer_.GetAsyncValue());
   }
 
   absl::StatusOr<PjRtDeviceEventRef> CopyRawToRemoteDevice(

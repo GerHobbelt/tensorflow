@@ -3303,28 +3303,32 @@ tf_kernel_library(
     deps = IO_DEPS,
 )
 
-SAVE_RESTORE_DEPS = [
-    ":checkpoint_callback_manager",
-    ":save_restore_tensor",
-    "//tensorflow/core:framework",
-    "//tensorflow/core:lib",
-    "//tensorflow/core:lib_internal",
-    "//tensorflow/core:protos_all_cc",
-    "//tensorflow/core/framework:bounds_check",
-    "//tensorflow/core/util/tensor_bundle",
-    "//tensorflow/core/util/tensor_bundle:naming",
-]
-
 tf_kernel_library(
     name = "restore_op",
     prefix = "restore_op",
-    deps = SAVE_RESTORE_DEPS,
+    deps = [
+        ":checkpoint_callback_manager",
+        ":save_restore_tensor",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:lib_internal",
+    ],
 )
 
 tf_kernel_library(
     name = "save_op",
     prefix = "save_op",
-    deps = SAVE_RESTORE_DEPS,
+    deps = [
+        ":save_restore_tensor",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:lib",
+        "//tensorflow/core/framework:tensor",
+        "//tensorflow/core/framework:tensor_shape",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/strings:string_view",
+    ],
 )
 
 tf_kernel_library(
@@ -3362,7 +3366,17 @@ tf_cc_tests(
 tf_kernel_library(
     name = "save_restore_v2_ops",
     prefix = "save_restore_v2_ops",
-    deps = SAVE_RESTORE_DEPS,
+    deps = [
+        ":checkpoint_callback_manager",
+        ":save_restore_tensor",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:lib_internal",
+        "//tensorflow/core:protos_all_cc",
+        "//tensorflow/core/framework:bounds_check",
+        "//tensorflow/core/util/tensor_bundle",
+        "//tensorflow/core/util/tensor_bundle:naming",
+    ],
 )
 
 tf_kernel_library(
@@ -4805,6 +4819,8 @@ cc_library(
 
 PARSING_DEPS = [
     "@com_google_absl//absl/base",
+    "@com_google_absl//absl/status",
+    "@com_google_absl//absl/strings",
     "//tensorflow/core:core_cpu_internal",
     "//tensorflow/core:framework",
     "//tensorflow/core:lib",
@@ -4834,7 +4850,6 @@ tf_kernel_library(
     prefix = "decode_compressed_op",
     deps = [
         "//tensorflow/core:lib_internal",
-        "@com_google_absl//absl/status",
         "@net_zstd//:zstd",
     ] + PARSING_DEPS,
 )
@@ -4850,7 +4865,6 @@ tf_kernel_library(
     prefix = "parse_tensor_op",
     deps = [
         "//tensorflow/core/util/tensor_bundle:byteswaptensor",
-        "@com_google_absl//absl/strings",
     ] + PARSING_DEPS,
 )
 
@@ -5160,7 +5174,11 @@ tf_kernel_library(
     name = "sparse_concat_op",
     features = ["-layering_check"],
     prefix = "sparse_concat_op",
-    deps = SPARSE_DEPS + if_cuda_or_rocm([
+    deps = SPARSE_DEPS + [
+        "//tensorflow/core/util:overflow",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+    ] + if_cuda_or_rocm([
         ":gpu_device_array",
         ":gpu_prim_helpers",
     ]),
@@ -6464,15 +6482,17 @@ alias(
 filegroup(
     name = "portable_core_ops",
     srcs = [
+        ":portable_core_ops_hdrs",
+        ":portable_core_ops_srcs",
+    ],
+)
+
+filegroup(
+    name = "portable_core_ops_srcs",
+    srcs = [
         "aggregate_ops.cc",
-        "aggregate_ops.h",
-        "aggregate_ops_cpu.h",
-        "assign_op.h",
         "bias_op.cc",
-        "bias_op.h",
         "cast_op.cc",
-        "cast_op.h",
-        "cast_op_impl.h",
         "cast_op_impl_bfloat.cc",
         "cast_op_impl_bool.cc",
         "cast_op_impl_complex128.cc",
@@ -6491,28 +6511,16 @@ filegroup(
         "cast_op_impl_uint4.cc",
         "cast_op_impl_uint64.cc",
         "cast_op_impl_uint8.cc",
-        "concat_lib.h",
         "concat_lib_cpu.cc",
-        "concat_lib_cpu.h",
         "concat_op.cc",
         "constant_op.cc",
-        "constant_op.h",
-        "cwise_ops.h",
         "cwise_ops_common.cc",
-        "cwise_ops_common.h",
-        "cwise_ops_gradients.h",
         "dense_update_functor.cc",
-        "dense_update_functor.h",
         "dense_update_ops.cc",
         "example_parsing_ops.cc",
         "fill_functor.cc",
-        "fill_functor.h",
         "function_ops.cc",
-        "function_ops.h",
-        "gather_functor.h",
-        "gather_functor_batched.h",
         "gather_nd_op.cc",
-        "gather_nd_op.h",
         "gather_nd_op_cpu_impl_0.cc",
         "gather_nd_op_cpu_impl_1.cc",
         "gather_nd_op_cpu_impl_2.cc",
@@ -6523,33 +6531,18 @@ filegroup(
         "gather_nd_op_cpu_impl_7.cc",
         "gather_op.cc",
         "identity_n_op.cc",
-        "identity_n_op.h",
         "identity_op.cc",
-        "identity_op.h",
         "immutable_constant_op.cc",
-        "immutable_constant_op.h",
-        "matmul_op_impl.h",
         "matmul_op_real.cc",
         "no_op.cc",
-        "no_op.h",
         "one_hot_op.cc",
-        "one_hot_op.h",
-        "ops_util.h",
         "pack_op.cc",
-        "pooling_ops_common.h",
-        "redux_functor.h",
         "reshape_op.cc",
-        "reshape_op.h",
         "reverse_sequence_op.cc",
-        "reverse_sequence_op.h",
         "sendrecv_ops.cc",
-        "sendrecv_ops.h",
         "sequence_ops.cc",
-        "sequence_ops.h",
         "shape_ops.cc",
-        "shape_ops.h",
         "slice_op.cc",
-        "slice_op.h",
         "slice_op_cpu_impl_1.cc",
         "slice_op_cpu_impl_2.cc",
         "slice_op_cpu_impl_3.cc",
@@ -6559,15 +6552,11 @@ filegroup(
         "slice_op_cpu_impl_7.cc",
         "slice_op_cpu_impl_8.cc",
         "softmax_op.cc",
-        "softmax_op_functor.h",
         "sparse_concat_op.cc",
-        "sparse_concat_op.h",
-        "split_lib.h",
         "split_lib_cpu.cc",
         "split_op.cc",
         "split_v_op.cc",
         "strided_slice_op.cc",
-        "strided_slice_op.h",
         "strided_slice_op_inst_0.cc",
         "strided_slice_op_inst_1.cc",
         "strided_slice_op_inst_2.cc",
@@ -6579,13 +6568,57 @@ filegroup(
         "strided_slice_op_inst_8.cc",
         "unpack_op.cc",
         "variable_ops.cc",
-        "variable_ops.h",
         "variant_ops_util.cc",
-        "variant_ops_util.h",
-        "//tensorflow/c/kernels:portable_all_op_kernels",
+        "//tensorflow/c/kernels:portable_all_op_kernel_srcs",
         "//tensorflow/core/kernels/image:non_max_suppression_op.cc",
-        "//tensorflow/core/kernels/image:non_max_suppression_op.h",
         "//tensorflow/core/util:bad_indices_policy.cc",
+    ],
+)
+
+filegroup(
+    name = "portable_core_ops_hdrs",
+    srcs = [
+        "aggregate_ops.h",
+        "aggregate_ops_cpu.h",
+        "assign_op.h",
+        "bias_op.h",
+        "cast_op.h",
+        "cast_op_impl.h",
+        "concat_lib.h",
+        "concat_lib_cpu.h",
+        "constant_op.h",
+        "cwise_ops.h",
+        "cwise_ops_common.h",
+        "cwise_ops_gradients.h",
+        "dense_update_functor.h",
+        "fill_functor.h",
+        "function_ops.h",
+        "gather_functor.h",
+        "gather_functor_batched.h",
+        "gather_nd_op.h",
+        "identity_n_op.h",
+        "identity_op.h",
+        "immutable_constant_op.h",
+        "matmul_op_impl.h",
+        "no_op.h",
+        "one_hot_op.h",
+        "ops_util.h",
+        "pooling_ops_common.h",
+        "redux_functor.h",
+        "reshape_op.h",
+        "reverse_sequence_op.h",
+        "sendrecv_ops.h",
+        "sequence_ops.h",
+        "shape_ops.h",
+        "slice_op.h",
+        "softmax_op_functor.h",
+        "sparse_concat_op.h",
+        "split_lib.h",
+        "strided_slice_op.h",
+        "variable_ops.h",
+        "variant_ops_util.h",
+        "//tensorflow/c/kernels:portable_all_op_kernel_hdrs",
+        "//tensorflow/core/kernels/image:non_max_suppression_op.h",
         "//tensorflow/core/util:bad_indices_policy.h",
     ],
 )
@@ -6634,7 +6667,6 @@ filegroup(
         "function_ops.h",
         "fused_batch_norm_op.h",
         "gpu_utils.h",
-        "inplace_ops.cc",
         "inplace_ops_functor.h",
         "l2loss_op.h",
         "list_kernels.h",
@@ -6721,6 +6753,7 @@ filegroup(
         "//tensorflow/core/util:bad_indices_policy.h",
         "//tensorflow/core/util:image_resizer_state.h",
     ],
+    visibility = ["//visibility:public"],
 )
 
 filegroup(
@@ -6843,6 +6876,7 @@ filegroup(
         "fused_batch_norm_op.cc",
         "fused_eigen_output_kernels.cc",
         "fused_eigen_output_kernels.h",
+        "inplace_ops.cc",
         "listdiff_op.cc",
         "population_count_op.cc",
         "population_count_op.h",
@@ -7089,9 +7123,7 @@ filegroup(
     srcs = [
         "dequantize_op.cc",
         "meta_support.cc",
-        "meta_support.h",
         "quantization_utils.cc",
-        "quantization_utils.h",
         "quantize_down_and_shrink_range.cc",
         "quantize_op.cc",
         "quantized_activation_ops.cc",
@@ -7106,9 +7138,19 @@ filegroup(
         "quantized_pooling_ops.cc",
         "quantized_reshape_op.cc",
         "quantized_resize_bilinear_op.cc",
-        "reference_gemm.h",
         "requantization_range_op.cc",
         "requantize.cc",
+        ":portable_quantized_ops_hdrs",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "portable_quantized_ops_hdrs",
+    srcs = [
+        "meta_support.h",
+        "quantization_utils.h",
+        "reference_gemm.h",
         "reshape_op.h",
     ],
     visibility = ["//visibility:public"],

@@ -76,6 +76,12 @@ class CommonPjRtClient : public PjRtClient {
   // TODO(parkers): Properly support error buffers on GPU and CPU.
   virtual bool include_raw_buffer_in_ready_event() const { return false; }
   virtual bool supports_predetermined_error() const { return true; }
+  // TODO(parkers): The xla::Shape should know how to update itself when we go
+  // from a static to the runtime shape. This should not be runtime dependent.
+  virtual absl::StatusOr<xla::Shape> UpdateLayoutForDynamicShapes(
+      int memory_space_kind_id, xla::Shape shape) const {
+    return std::move(shape);
+  }
 
   // Backend specific handlers for when an oom is detected during execute.
   virtual void CallOomHandlers() const {}
@@ -212,7 +218,7 @@ class CommonPjRtClient : public PjRtClient {
 
   virtual std::unique_ptr<PjRtDeviceEventSet> CreateDeviceEventSet(
       size_t preallocated_size) const {
-    LOG(FATAL) << "Implement";
+    return std::make_unique<DefaultPjRtDeviceEventSet>(preallocated_size);
   }
 
   tsl::Future<> MakeTrackedReadyFuture(PjRtDeviceEventPtr device_event,
@@ -402,7 +408,7 @@ class CommonPjRtClient : public PjRtClient {
 
   virtual void AddEventDependencies(
       PjRtMemorySpace* memory_space, PjRtDeviceEventPtr device_event,
-      absl::Span<const tsl::RCReference<tsl::AsyncValue>> dependencies) {}
+      absl::Span<const PjRtDeviceEventRef> dependencies) {}
 
   virtual void RegisterClientThreadWait(PjRtMemorySpace* memory_space,
                                         PjRtDeviceEventPtr device_event,
