@@ -3682,6 +3682,23 @@ tf_cc_test(
     ],
 )
 
+tf_cc_test(
+    name = "initializable_lookup_table_test",
+    size = "small",
+    srcs = ["initializable_lookup_table_test.cc"],
+    deps = [
+        ":initializable_lookup_table",
+        ":lookup_table_op",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:test",
+        "//tensorflow/core:test_main",
+        "//tensorflow/core:testlib",
+        "//tensorflow/core/platform:refcount",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:status_matchers",
+    ],
+)
+
 MATH_DEPS = [
     ":fill_functor",
     "//tensorflow/core:core_cpu",
@@ -8376,9 +8393,7 @@ cc_library(
     name = "loose_headers",
     tags = ["avoid_dep"],
     textual_hdrs = glob(["*.h"]),
-    visibility = [
-        "//tensorflow:__subpackages__",
-    ] + LOOSE_HEADER_VISIBILITY,
+    visibility = LOOSE_HEADER_VISIBILITY,
     deps = [
         "@com_google_absl//absl/container:inlined_vector",
         "@com_google_absl//absl/log:check",

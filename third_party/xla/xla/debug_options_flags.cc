@@ -3901,12 +3901,17 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       debug_options->xla_gpu_rocm_max_trace_events(),
       "Maximum number of ROCm trace events (applies to callback/activity/"
       "annotation). Set as high as memory allows; up to 1e9."));
+  flag_list->push_back(
+      tsl::Flag("xla_gpu_experimental_enable_tiling_propagation",
+                noop_flag_setter<bool>, true, "Deprecated, do not use."));
   flag_list->push_back(tsl::Flag(
-      "xla_gpu_experimental_enable_tiling_propagation",
+      "xla_gpu_experimental_enable_reduction_dimension_tiling",
       bool_setter_for(
-          &DebugOptions::set_xla_gpu_experimental_enable_tiling_propagation),
-      debug_options->xla_gpu_experimental_enable_tiling_propagation(),
-      "If true, enable experimental tiling propagation."));
+          &DebugOptions::
+              set_xla_gpu_experimental_enable_reduction_dimension_tiling),
+      debug_options->xla_gpu_experimental_enable_reduction_dimension_tiling(),
+      "If true, the block-level (Triton) tiling search also enumerates tile "
+      "sizes for reduction dimensions."));
 
   auto setter_for_xla_gpu_detect_nan =
       [debug_options, detection_mode](const std::string& value) {

@@ -130,6 +130,20 @@ UNARY_TEST(Rsqrt, {
             .strict_signed_zeros()
             .build();
       })
+      .CpuError(+[](NativeT x) {
+        if constexpr (std::is_same_v<NativeT, double>) {
+          // The reference 1.0 / std::sqrt(x) computed in double can itself be
+          // 1 ULP off from the exact value in the opposite direction.
+          return ErrorSpec::Builder()
+              .distance_err(2)
+              .strict_signed_zeros()
+              .build();
+        }
+        return ErrorSpec::Builder()
+            .distance_err(1)
+            .strict_signed_zeros()
+            .build();
+      })
       .Run();
 })
 UNARY_TEST(Sqrt, {
@@ -286,13 +300,16 @@ UNARY_TEST(Cosh, {
 UNARY_TEST(Sinh, {
   SinhOp<kT>(this)
       .Error(GetDefaultSpecGenerator())
-      .CpuError(+[](NativeT x) {
-        if constexpr (std::is_same_v<NativeT, tsl::float8_e4m3fn>) {
-          return ErrorSpec::Builder().distance_err(3).build();
-        } else if constexpr (std::is_same_v<NativeT, tsl::float8_e5m2>) {
-          return ErrorSpec::Builder().distance_err(4).build();
+      .CpuError(+[](NativeT) {
+        if constexpr (std::is_same_v<NativeT, bfloat16> ||
+                      std::is_same_v<NativeT, tsl::float8_e4m3fn> ||
+                      std::is_same_v<NativeT, tsl::float8_e5m2>) {
+          return ErrorSpec::Builder().distance_err(0).build();
+        } else if constexpr (std::is_same_v<NativeT, double>) {
+          return ErrorSpec::Builder().distance_err(2).build();
+        } else {
+          return ErrorSpec::Builder().distance_err(1).build();
         }
-        return GetDefaultSpecGenerator()(x);
       })
       .GpuError(+[](NativeT x) {
         if constexpr (std::is_same_v<NativeT, tsl::float8_e5m2>) {

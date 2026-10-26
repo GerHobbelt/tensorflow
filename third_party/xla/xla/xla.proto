@@ -1883,7 +1883,9 @@ message DebugOptions {
   optional int64 xla_gpu_async_copy_min_bytes = 522;
 
   // If true, enable experimental tiling propagation.
-  optional bool xla_gpu_experimental_enable_tiling_propagation = 456;
+  // TODO(b/514293537): drop the flag.
+  optional bool xla_gpu_experimental_enable_tiling_propagation = 456
+      [deprecated = true];
 
   // Enables and controls expetimental cost model-driven tiling choices for GEMM
   // fusions.
@@ -1952,7 +1954,14 @@ message DebugOptions {
   // Requires sm_90+ and CUDA 13.3+ (tileiras) at runtime. Off by default.
   optional bool xla_gpu_experimental_enable_tensor_ir = 557;
 
-  // Next id: 558
+  // If true, the block-level (Triton) tiling search also enumerates tile sizes
+  // for reduction dimensions, i.e. reductions may be emitted as a loop over
+  // tiles.
+  // TODO(b/534676634): Only fusions with a single reduce over a single
+  // dimension are tiled for now; extend to the other cases.
+  optional bool xla_gpu_experimental_enable_reduction_dimension_tiling = 558;
+
+  // Next id: 559
 
   // Extra options to pass to the compilation backend (e.g. LLVM); specific
   // interpretation of these values is left to the backend.

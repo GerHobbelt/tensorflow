@@ -344,13 +344,22 @@ void SpmdBuilder::SetBroadcastDimsForReshape(const HloInstruction& hlo) {
   if (it == broadcast_dims_.end()) {
     return;
   }
+  if (visiting_hlo_ == nullptr ||
+      visiting_hlo_->opcode() != HloOpcode::kReshape ||
+      visiting_hlo_->operand(0)->shape().dimensions().size() !=
+          hlo.operand(0)->shape().dimensions().size() ||
+      visiting_hlo_->shape().dimensions().size() !=
+          hlo.shape().dimensions().size()) {
+    return;
+  }
   std::vector<int64_t> iota_dims(hlo.shape().dimensions().size());
   absl::c_iota(iota_dims, 0);
   absl::flat_hash_set<int64_t> reshape_broadcast_dims(iota_dims.begin(),
                                                       iota_dims.end());
 
-  absl::Span<const int64_t> operand_dims = hlo.operand(0)->shape().dimensions();
-  absl::Span<const int64_t> hlo_dims = hlo.shape().dimensions();
+  absl::Span<const int64_t> operand_dims =
+      visiting_hlo_->operand(0)->shape().dimensions();
+  absl::Span<const int64_t> hlo_dims = visiting_hlo_->shape().dimensions();
   std::vector<int64_t> before_dim_size_stack(operand_dims.rbegin(),
                                              operand_dims.rend());
   std::vector<int64_t> after_dim_size_stack(hlo_dims.rbegin(), hlo_dims.rend());
@@ -7340,6 +7349,9 @@ static HloSharding ResolveReductionOpForSharding(
   } else if (!sharding.IsUnreducedSubgroup()) {
     return sharding;
   }
+  if (sharding.reduction_op() != ReductionOp::kSum) {
+    return sharding;
+  }
 
   const HloInstruction* current = instruction;
   while (current && current->opcode() != HloOpcode::kReduce &&
@@ -7367,9 +7379,15 @@ static HloSharding ResolveReductionOpForSharding(
     if (module && module->has_spmd_parameters_shardings() &&
         current->parameter_number() <
             module->spmd_parameters_shardings().size()) {
-      sharding.set_reduction_op(
-          module->spmd_parameters_shardings()[current->parameter_number()]
-              .reduction_op());
+      const HloSharding& param_sharding =
+          module->spmd_parameters_shardings()[current->parameter_number()];
+      const bool param_has_unreduced =
+          param_sharding.UseNamedShardingLeaf()
+              ? !param_sharding.named_sharding().unreduced_axes().empty()
+              : param_sharding.IsUnreducedSubgroup();
+      if (param_has_unreduced) {
+        sharding.set_reduction_op(param_sharding.reduction_op());
+      }
     }
   }
   return sharding;

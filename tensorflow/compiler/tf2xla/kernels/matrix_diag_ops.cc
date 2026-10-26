@@ -440,21 +440,27 @@ class MatrixDiagPartOp : public XlaOpKernel {
                        context->builder(),
                        static_cast<int32_t>(input_shape.dim_size(dim)));
     };
+    // Only built with dynamic matrix dimensions, so that static inputs build
+    // the same HLO as before.
+    xla::XlaOp actual_num_rows;
+    xla::XlaOp actual_num_cols;
     // The length of the longest diagonal from lower to upper at the actual
-    // sizes.
+    // sizes. Diagonals outside the actual matrix, which the CPU kernel
+    // rejects, have length 0.
     const auto actual_len = [&](int64_t lower, int64_t upper) {
-      const xla::XlaOp actual_num_rows = actual_size(input_rank - 2);
-      const xla::XlaOp actual_num_cols = actual_size(input_rank - 1);
-      return xla::Min(
-          xla::Add(actual_num_rows,
-                   xla::ScalarLike(actual_num_rows,
-                                   std::min(upper, int64_t{0}))),
-          xla::Sub(actual_num_cols,
-                   xla::ScalarLike(actual_num_cols,
-                                   std::max(lower, int64_t{0}))));
+      return xla::Max(
+          xla::Min(xla::Add(actual_num_rows,
+                            xla::ScalarLike(actual_num_rows,
+                                            std::min(upper, int64_t{0}))),
+                   xla::Sub(actual_num_cols,
+                            xla::ScalarLike(actual_num_cols,
+                                            std::max(lower, int64_t{0})))),
+          xla::ScalarLike(actual_num_rows, 0));
     };
     xla::XlaOp actual_max_diag_len;
     if (dynamic_matrix) {
+      actual_num_rows = actual_size(input_rank - 2);
+      actual_num_cols = actual_size(input_rank - 1);
       actual_max_diag_len = actual_len(lower_diag_index, upper_diag_index);
     }
 
@@ -462,8 +468,11 @@ class MatrixDiagPartOp : public XlaOpKernel {
     std::vector<xla::XlaOp> diag_list;
     xla::PaddingConfig padding_config =
         xla::MakeNoPaddingConfig(input_rank - 1);
+    // XLA:GPU can lay out the gather's output with the batch dimensions minor,
+    // and a batched dynamic output laid out that way comes back transposed.
+    const bool use_gather = is_gpu_ && !input_xla_shape.is_dynamic();
     if (num_diags == 1) {
-      output = is_gpu_
+      output = use_gather
                    ? xla::GetMatrixDiagonalViaGather(input, upper_diag_index)
                    : xla::GetMatrixDiagonal(input, upper_diag_index);
     } else {
@@ -473,10 +482,9 @@ class MatrixDiagPartOp : public XlaOpKernel {
       for (int diag_index = upper_diag_index; diag_index >= lower_diag_index;
            --diag_index) {
         xla::XlaOp single_diag =
-            is_gpu_ ? xla::GetMatrixDiagonalViaGather(input, diag_index)
-                    : xla::GetMatrixDiagonal(input, diag_index);
-        const int64_t diag_len =
-            ComputeDiagLen(diag_index, num_rows, num_cols);
+            use_gather ? xla::GetMatrixDiagonalViaGather(input, diag_index)
+                       : xla::GetMatrixDiagonal(input, diag_index);
+        const int64_t diag_len = ComputeDiagLen(diag_index, num_rows, num_cols);
         const int64_t padding_len = max_diag_len - diag_len;
         const bool left_aligned = IsLeftAligned(
             diag_index, left_align_superdiagonal_, left_align_subdiagonal_);
@@ -485,9 +493,9 @@ class MatrixDiagPartOp : public XlaOpKernel {
           // and pad its entries past its actual length, which come from
           // outside the actual matrix, with padding_value too.
           const xla::XlaOp len = actual_len(diag_index, diag_index);
-          const xla::XlaOp offset =
-              left_aligned ? xla::ScalarLike(len, 0)
-                           : xla::Sub(actual_max_diag_len, len);
+          const xla::XlaOp offset = left_aligned
+                                        ? xla::ScalarLike(len, 0)
+                                        : xla::Sub(actual_max_diag_len, len);
           padding_config.mutable_dimensions(input_rank - 2)
               ->set_edge_padding_low(max_diag_len);
           padding_config.mutable_dimensions(input_rank - 2)
@@ -499,9 +507,9 @@ class MatrixDiagPartOp : public XlaOpKernel {
               xla::Sub(xla::ScalarLike(len, max_diag_len), offset);
           single_diag =
               xla::DynamicSlice(single_diag, start_indices, slice_sizes);
-          const xla::XlaOp in_diagonal = xla::Lt(
-              xla::Iota(context->builder(), xla::S32, max_diag_len),
-              xla::Add(offset, len));
+          const xla::XlaOp in_diagonal =
+              xla::Lt(xla::Iota(context->builder(), xla::S32, max_diag_len),
+                      xla::Add(offset, len));
           single_diag = xla::Select(
               xla::BroadcastInDim(in_diagonal, slice_sizes, {input_rank - 2}),
               single_diag, xla::Broadcast(padding_value, slice_sizes));
@@ -563,10 +571,9 @@ class MatrixDiagPartV3Op : public XlaOpKernel {
   void Compile(XlaOpKernelContext* context) override {
     xla::Shape input_xla_shape;
     OP_REQUIRES_VALUE(input_xla_shape, context, context->InputXlaShape(0));
-    XlaOpKernel& kernel =
-        input_xla_shape.is_dynamic()
-            ? static_cast<XlaOpKernel&>(dynamic_shape_kernel_)
-            : static_cast<XlaOpKernel&>(mlir_kernel_);
+    XlaOpKernel& kernel = input_xla_shape.is_dynamic()
+                              ? static_cast<XlaOpKernel&>(dynamic_shape_kernel_)
+                              : static_cast<XlaOpKernel&>(mlir_kernel_);
     kernel.Compile(context);
   }
 

@@ -420,11 +420,6 @@ CodegenDecision CanTritonHandleReduce(
         "Unsupported reduction computation by Triton.");
   }
 
-  bool tiling_propagation_enabled =
-      reduce.GetModule()
-          ->config()
-          .debug_options()
-          .xla_gpu_experimental_enable_tiling_propagation();
 
   if (reduce.operand_count() != 2) {
     return CodegenDecision::Forbid(
@@ -436,11 +431,6 @@ CodegenDecision CanTritonHandleReduce(
         "Reduction must have at least one dimension.");
   }
 
-  if (reduce.dimensions().size() > 1 && !tiling_propagation_enabled) {
-    return CodegenDecision::Forbid(
-        "Multi-dimension reductions are only supported when experimental "
-        "tiling propagation is enabled.");
-  }
 
   return CodegenDecision::Allow();
 }
@@ -505,6 +495,20 @@ CodegenDecision IsTritonSupportedReduceScatter(
   }
 
   return CodegenDecision::Allow();
+}
+
+CodegenDecision IsTritonSupportedAllToAll(
+    const HloAllToAllInstruction& all_to_all) {
+  if (!all_to_all.shape().IsArray() ||
+      !all_to_all.split_dimension().has_value()) {
+    return CodegenDecision::Forbid(
+        "Only array all-to-alls with split_dimension are supported.");
+  }
+  if (all_to_all.replica_groups().empty()) {
+    return CodegenDecision::Forbid("All-to-all does not have replica groups.");
+  }
+  return CodegenDecision(all_to_all.shape().element_type() != S4,
+                         "S4 is not supported.");
 }
 
 absl::Status CheckSupportedCheckDotDimensions(const HloDotInstruction& dot) {
@@ -988,6 +992,8 @@ CodegenDecision IsTritonSupportedInstructionImpl(
     case HloOpcode::kAllGather:
       return CodegenDecision(instr.shape().element_type() != S4,
                              "S4 is not supported.");
+    case HloOpcode::kAllToAll:
+      return IsTritonSupportedAllToAll(*Cast<HloAllToAllInstruction>(&instr));
     case HloOpcode::kReduceScatter:
       return IsTritonSupportedReduceScatter(
           *Cast<HloReduceScatterInstruction>(&instr), gpu_version);
