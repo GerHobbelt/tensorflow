@@ -52,8 +52,10 @@ limitations under the License.
 #include "xla/pjrt/linearize_throttler.h"
 #include "xla/pjrt/pjrt_client.h"
 #include "xla/pjrt/pjrt_device_description.h"
+#include "xla/pjrt/pjrt_executable.h"
 #include "xla/pjrt/raw_buffer.h"
 #include "xla/pjrt/raw_pjrt_client.h"
+#include "xla/pjrt/strided_gather.h"
 #include "xla/pjrt/transpose.h"
 #include "xla/runtime/device_id.h"
 #include "xla/shape.h"
@@ -329,8 +331,10 @@ class CommonPjRtClient : public PjRtClient {
         std::move(dependency));
   }
 
+  using PjRtClient::CreateErrorBuffer;
   absl::StatusOr<std::unique_ptr<PjRtBuffer>> CreateErrorBuffer(
-      absl::Status error, const Shape& shape, PjRtMemorySpace* memory) override;
+      absl::Status error, const Shape& shape, PjRtMemorySpace* memory,
+      const Layout* layout) override;
 
   // Registers the necessary debug information for an allocation event.
   // TODO(parkers): Once everything is unified this should be controlled
@@ -730,12 +734,23 @@ class CommonPjRtLoadedExecutable : public PjRtLoadedExecutable {
       std::optional<tsl::Future<void>>& returned_future,
       bool fill_future) const override;
 
+  absl::StatusOr<ResultWithDonationRecovery> ExecuteShardedWithDonationRecovery(
+      absl::Span<PjRtBuffer* const> argument_handles, PjRtDevice* device,
+      const ExecuteOptions& options,
+      std::optional<tsl::Future<void>>& returned_future) const override;
+
   using PjRtLoadedExecutable::ExecutePortable;
   absl::StatusOr<std::vector<std::unique_ptr<PjRtBuffer>>> ExecutePortable(
       absl::Span<PjRtBuffer* const> argument_handles, PjRtDevice* device,
       const ExecuteOptions& options,
       std::optional<tsl::Future<void>>& returned_future,
       bool fill_future) const override;
+
+  absl::StatusOr<ResultWithDonationRecovery>
+  ExecutePortableWithDonationRecovery(
+      absl::Span<PjRtBuffer* const> argument_handles, PjRtDevice* device,
+      const ExecuteOptions& options,
+      std::optional<tsl::Future<void>>& returned_future) const override;
 
   DispatchInfo GetDispatchInfo() const {
     return {
@@ -895,7 +910,9 @@ class CommonPjRtLoadedExecutable : public PjRtLoadedExecutable {
   absl::StatusOr<Result> ExecuteHelperOnSingleDevice(
       absl::Span<PjRtBuffer* const> argument_handles, xla::RunId run_id,
       int replica, int partition, const ExecuteOptions& options,
-      bool fill_future, PjRtDevice* device = nullptr) const;
+      bool fill_future, PjRtDevice* device = nullptr,
+      std::vector<CommonPjRtBuffer::DonatedBufferInfo>* donated_buffer_infos =
+          nullptr) const;
 
   absl::Status ExecutePrepareWithOomRetries(
       std::optional<ExecuteLaunchArgs>& launch_args,
@@ -903,8 +920,32 @@ class CommonPjRtLoadedExecutable : public PjRtLoadedExecutable {
       int replica, int partition, const ExecuteOptions& options,
       size_t host_callback_idx, PjRtDevice* device = nullptr) const;
 
-  absl::StatusOr<Result> ExecuteLaunch(ExecuteLaunchArgs& launch_args,
-                                       bool fill_future) const;
+  absl::StatusOr<Result> ExecuteLaunch(
+      ExecuteLaunchArgs& launch_args, bool fill_future,
+      std::vector<CommonPjRtBuffer::DonatedBufferInfo>* donated_buffer_infos =
+          nullptr) const;
+
+  absl::StatusOr<std::vector<std::unique_ptr<PjRtBuffer>>> ExecuteShardedImpl(
+      absl::Span<PjRtBuffer* const> argument_handles, PjRtDevice* device,
+      const ExecuteOptions& options,
+      std::optional<tsl::Future<void>>& returned_future, bool fill_future,
+      std::vector<CommonPjRtBuffer::DonatedBufferInfo>* donated_buffer_infos =
+          nullptr) const;
+
+  absl::StatusOr<std::vector<std::unique_ptr<PjRtBuffer>>> ExecutePortableImpl(
+      absl::Span<PjRtBuffer* const> argument_handles, PjRtDevice* device,
+      const ExecuteOptions& options,
+      std::optional<tsl::Future<void>>& returned_future, bool fill_future,
+      std::vector<CommonPjRtBuffer::DonatedBufferInfo>* donated_buffer_infos =
+          nullptr) const;
+
+  // Wraps `output_buffers` into a `ResultWithDonationRecovery` whose
+  // `recovery_future` is driven by `execution_future` (the completion future of
+  // the launched execution) and `donated_buffer_infos`.
+  ResultWithDonationRecovery MakeResultWithDonationRecovery(
+      std::vector<std::unique_ptr<PjRtBuffer>> output_buffers,
+      std::vector<CommonPjRtBuffer::DonatedBufferInfo> donated_buffer_infos,
+      const tsl::Future<void>& execution_future) const;
 
   CommonPjRtClient* client_;
   // Parameter shapes.
@@ -960,6 +1001,19 @@ class CommonPjRtRawBufferImpl : public PjRtRawBuffer {
       PjRtDeviceEventPromiseRef definition_event_promise,
       PjRtDeviceEventPromiseRef src_usage_event_promise,
       absl::AnyInvocable<void(absl::Status) &&> allocation_event) override;
+
+  void ScheduleCopySliceTo(
+      PjRtDeviceEventRefVector transfer_dependency_events,
+      const StridedGather& gather, PjRtRawBufferRef dst_raw_buffer,
+      PjRtDeviceEventPromiseRef definition_event_promise,
+      PjRtDeviceEventPromiseRef src_usage_event_promise,
+      absl::AnyInvocable<void(absl::Status) &&> allocation_event) override;
+
+  void ScheduleUpdateSlice(
+      PjRtDeviceEventRefVector transfer_dependency_events,
+      const StridedGather& gather, PjRtRawBufferRef src_raw_buffer,
+      PjRtDeviceEventPromiseRef definition_event_promise,
+      PjRtDeviceEventPromiseRef src_usage_event_promise) override;
 };
 
 // TODO(parkers): Merge everything here into CommonPjRtBuffer.
@@ -1005,6 +1059,12 @@ class CommonPjRtBufferImpl : public CommonPjRtBuffer {
   absl::StatusOr<std::unique_ptr<PjRtBuffer>> Bitcast(
       xla::PrimitiveType element_type, absl::Span<const int64_t> dims,
       const Layout* device_layout) override;
+
+  absl::StatusOr<std::unique_ptr<PjRtBuffer>> CopySlice(
+      const StridedGather& gather, const xla::Shape& dst_shape) override;
+
+  absl::StatusOr<std::unique_ptr<PjRtBuffer>> UpdateSlice(
+      const StridedGather& gather, PjRtBuffer* slice) override;
 
   absl::StatusOr<std::unique_ptr<PjRtBuffer>> CopyToMemorySpace(
       PjRtMemorySpace* dst_memory_space) override;

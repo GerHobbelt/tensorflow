@@ -4202,17 +4202,37 @@ absl::Status AlgebraicSimplifierVisitor::RewriteBatchPlusContractingAsReduce(
   int64_t rhs_outer_dims = rhs->shape().dimensions().size() -
                            (dnums.rhs_batch_dimensions_size() +
                             dnums.rhs_contracting_dimensions_size());
-  CHECK(lhs_outer_dims == 0 || rhs_outer_dims == 0);
+  Shape broadcast_shape = new_lhs->shape();
+  if (lhs_outer_dims == 0) {
+    broadcast_shape = new_rhs->shape();
+  } else if (rhs_outer_dims > 0) {
+    std::vector<int64_t> broadcast_dims(dot->shape().dimensions().begin(),
+                                        dot->shape().dimensions().end());
+    std::vector<bool> dynamic_dims(dot->shape().dynamic_dimensions().begin(),
+                                   dot->shape().dynamic_dimensions().end());
+    const int64_t contracting_start =
+        dnums.lhs_batch_dimensions_size() + lhs_outer_dims;
+    for (int64_t i = contracting_start;
+         i < new_lhs->shape().dimensions().size(); ++i) {
+      broadcast_dims.push_back(new_lhs->shape().dimensions(i));
+      dynamic_dims.push_back(new_lhs->shape().is_dynamic_dimension(i));
+    }
+    broadcast_shape = ShapeUtil::MakeShape(dot->shape().element_type(),
+                                           broadcast_dims, dynamic_dims);
+    simplifier_->UpdateLayout(&broadcast_shape);
+  }
   if (rhs_outer_dims > 0) {
-    std::vector<int64_t> lhs_broadcast_dims(dnums.lhs_batch_dimensions_size());
+    const int64_t prefix_dims =
+        dnums.lhs_batch_dimensions_size() + lhs_outer_dims;
+    std::vector<int64_t> lhs_broadcast_dims(prefix_dims);
     absl::c_iota(lhs_broadcast_dims, 0);
     lhs_broadcast_dims.resize(lhs->shape().dimensions().size());
-    std::iota(lhs_broadcast_dims.begin() + dnums.lhs_batch_dimensions_size(),
-              lhs_broadcast_dims.end(),
-              dnums.lhs_batch_dimensions_size() + rhs_outer_dims);
+    std::iota(lhs_broadcast_dims.begin() + prefix_dims,
+              lhs_broadcast_dims.end(), prefix_dims + rhs_outer_dims);
     new_lhs = dot->AddInstruction(HloInstruction::CreateBroadcast(
-        new_rhs->shape(), new_lhs, lhs_broadcast_dims));
-  } else if (lhs_outer_dims > 0) {
+        broadcast_shape, new_lhs, lhs_broadcast_dims));
+  }
+  if (lhs_outer_dims > 0) {
     std::vector<int64_t> rhs_broadcast_dims(dnums.rhs_batch_dimensions_size());
     absl::c_iota(rhs_broadcast_dims, 0);
     rhs_broadcast_dims.resize(rhs->shape().dimensions().size());
@@ -4220,7 +4240,7 @@ absl::Status AlgebraicSimplifierVisitor::RewriteBatchPlusContractingAsReduce(
               rhs_broadcast_dims.end(),
               dnums.rhs_batch_dimensions_size() + lhs_outer_dims);
     new_rhs = dot->AddInstruction(HloInstruction::CreateBroadcast(
-        new_lhs->shape(), new_rhs, rhs_broadcast_dims));
+        broadcast_shape, new_rhs, rhs_broadcast_dims));
   }
 
   ABSL_ASSIGN_OR_RETURN(HloInstruction * new_dot,
@@ -4232,7 +4252,7 @@ absl::Status AlgebraicSimplifierVisitor::RewriteBatchPlusContractingAsReduce(
           ? (dot->shape().element_type() == F64 ? F64 : F32)
           : dot->shape().element_type();
   new_dot = AsType(new_dot, dot_type);
-  const int64_t outer_dims = std::max(rhs_outer_dims, lhs_outer_dims);
+  const int64_t outer_dims = lhs_outer_dims + rhs_outer_dims;
   absl::c_iota(reduce_dims, outer_dims + dnums.lhs_batch_dimensions_size());
   new_dot = AddReduce(new_dot, reduce_dims, dot_type);
   new_dot = AsType(new_dot, dot->shape().element_type());
@@ -10935,10 +10955,11 @@ absl::StatusOr<bool> AlgebraicSimplifierVisitor::SimplifyConvToMultiply(
     }
   }
 
-  // Stride ignores part of the output, which matrix multiplication does not do,
-  // so require no stride. Padding and dilation both implicitly extend the data,
-  // which matrix multiplication also does not do, so require no padding and no
-  // dilation.
+  // Stride ignores part of the output, which multiplication does not do, so
+  // require no stride. Padding and dilation both implicitly extend the data,
+  // which multiplication also does not do, so require no padding and no
+  // dilation. Window reversal is handled below by reversing the kernel along
+  // contracted spatial dimensions.
   if (window_util::HasStride(window) || window_util::HasPadding(window) ||
       window_util::HasDilation(window)) {
     return false;
@@ -10968,14 +10989,19 @@ absl::StatusOr<bool> AlgebraicSimplifierVisitor::SimplifyConvToMultiply(
       dnums.kernel_output_feature_dimension();
 
   // Set reduction dimensions for spatial dimensions where the kernel size is
-  // not equal to one.
+  // not equal to one, and record contracted spatial dimensions with window
+  // reversal. Window reversal on a spatial dimension of size one is a no-op.
   DimensionVector reduction_dimensions;
+  DimensionVector kernel_reverse_dimensions;
   for (int64_t i = 0; i < dnums.output_spatial_dimensions_size(); ++i) {
     int64_t dim = dnums.output_spatial_dimensions(i);
     input_permutation[dim] = dnums.input_spatial_dimensions(i);
     kernel_permutation[dim] = dnums.kernel_spatial_dimensions(i);
     if (kernel_shape.dimensions(dnums.kernel_spatial_dimensions(i)) != 1) {
       reduction_dimensions.push_back(dim);
+      if (window.dimensions(i).window_reversal()) {
+        kernel_reverse_dimensions.push_back(dnums.kernel_spatial_dimensions(i));
+      }
     }
   }
 
@@ -10987,6 +11013,9 @@ absl::StatusOr<bool> AlgebraicSimplifierVisitor::SimplifyConvToMultiply(
     input = MakeConvertToHlo(input, convolution_shape.element_type());
   }
 
+  if (!kernel_reverse_dimensions.empty()) {
+    ABSL_ASSIGN_OR_RETURN(kernel, MakeReverseHlo(kernel, kernel_reverse_dimensions));
+  }
   if (!absl::c_is_sorted(kernel_permutation)) {
     ABSL_ASSIGN_OR_RETURN(kernel, MakeTransposeHlo(kernel, kernel_permutation));
   }

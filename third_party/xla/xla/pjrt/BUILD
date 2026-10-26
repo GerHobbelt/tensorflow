@@ -211,6 +211,7 @@ cc_library(
         ":raw_buffer",
         ":raw_pjrt_client",
         ":staging_buffer",
+        ":strided_gather",
         ":transpose",
         ":utils",
         "//xla:executable_run_options",
@@ -406,6 +407,7 @@ cc_library(
         ":pjrt_executable",
         ":pjrt_layout",
         ":scoped_async_tracking_event",
+        ":strided_gather",
         ":utils",
         "//xla:future",
         "//xla:literal",
@@ -1293,6 +1295,7 @@ cc_library(
         ":device_event",
         ":pjrt_client",
         ":staging_buffer",
+        ":strided_gather",
         "//xla:future",
         "//xla:literal",
         "//xla:shape_util",
@@ -1413,6 +1416,7 @@ cc_library(
     visibility = internal_visibility([":friends"]),
     deps = [
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:cord",
         "@com_google_absl//absl/strings:string_view",
     ],
@@ -1516,16 +1520,6 @@ cc_library(
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@tsl//tsl/platform:platform_port",
-    ],
-)
-
-cc_library(
-    name = "never_run_on_fiber",
-    hdrs = ["never_run_on_fiber.h"],
-    deps = [
-        ":async_work_runner",
-        "//xla/tsl/platform:env",
-        "@com_google_absl//absl/synchronization",
     ],
 )
 
