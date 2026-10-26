@@ -2876,42 +2876,7 @@ PjRtCApiLoadedExecutable::PjRtCApiLoadedExecutable(
   executable_ =
       std::make_unique<PjRtCApiExecutable>(pjrt_c_api(), args.executable);
   InitDevices();
-  InitAddressableDeviceLogicalIds();
   InitDeviceAssignment();
-}
-
-void PjRtCApiLoadedExecutable::InitAddressableDeviceLogicalIds() {
-  if (pjrt_c_api()->pjrt_api_version.major_version == 0 &&
-      pjrt_c_api()->pjrt_api_version.minor_version < 96) {
-    return;
-  }
-  PJRT_LoadedExecutable_AddressableDeviceLogicalIds_Args args;
-  args.struct_size =
-      PJRT_LoadedExecutable_AddressableDeviceLogicalIds_Args_STRUCT_SIZE;
-  args.extension_start = nullptr;
-  args.executable = c_loaded_executable();
-  args.addressable_device_logical_ids = nullptr;
-  args.num_addressable_device_logical_ids = 0;
-
-  const PJRT_Api* api = pjrt_c_api();
-  if (api->PJRT_LoadedExecutable_AddressableDeviceLogicalIds == nullptr) {
-    return;
-  }
-  pjrt::LogFatalIfPjrtError(
-      api->PJRT_LoadedExecutable_AddressableDeviceLogicalIds(&args), api);
-
-  if (args.num_addressable_device_logical_ids == 0 ||
-      args.addressable_device_logical_ids == nullptr) {
-    return;
-  }
-  addressable_device_logical_ids_.reserve(
-      args.num_addressable_device_logical_ids);
-
-  for (size_t i = 0; i < args.num_addressable_device_logical_ids; ++i) {
-    PJRT_LogicalDeviceIds id = args.addressable_device_logical_ids[i];
-    addressable_device_logical_ids_.push_back(
-        LogicalDeviceIds{id.replica, id.partition});
-  }
 }
 
 void PjRtCApiLoadedExecutable::InitDevices() {
@@ -4611,6 +4576,48 @@ PjRtCApiTopologyDescription::Subslice(
   return std::make_unique<PjRtCApiTopologyDescription>(c_api_,
                                                        args.subslice_topology,
                                                        /*owned=*/true);
+}
+
+absl::StatusOr<std::unique_ptr<PjRtTopologyDescription>>
+PjRtCApiTopologyDescription::Subslice(
+    const PjRtDeviceDimensions& chip_bounds) const {
+  ABSL_ASSIGN_OR_RETURN(PjRtDeviceDimensions chips_per_host_bounds,
+                   ChipsPerProcessBounds());
+  if (chip_bounds.size() != chips_per_host_bounds.size()) {
+    return InvalidArgument(
+        "Subslice chip_bounds size %d does not match topology size %d",
+        chip_bounds.size(), chips_per_host_bounds.size());
+  }
+  for (size_t d = 0; d < chip_bounds.size(); ++d) {
+    if (chip_bounds[d] <= 0) {
+      return InvalidArgument("Subslice chip bounds %s must be positive.",
+                             chip_bounds.ToString());
+    }
+  }
+  PjRtDeviceDimensions subslice_chips_per_host_bounds = chip_bounds;
+  std::vector<int32_t> host_bounds_vec(chip_bounds.size(), 1);
+  for (size_t d = 0; d < chip_bounds.size(); ++d) {
+    if (chips_per_host_bounds[d] <= 0) {
+      return InvalidArgument(
+          "ChipsPerProcessBounds dimension %d has non-positive value %d", d,
+          chips_per_host_bounds[d]);
+    }
+    if (chip_bounds[d] <= chips_per_host_bounds[d]) {
+      subslice_chips_per_host_bounds[d] = chip_bounds[d];
+      host_bounds_vec[d] = 1;
+    } else if (chip_bounds[d] % chips_per_host_bounds[d] == 0) {
+      subslice_chips_per_host_bounds[d] = chips_per_host_bounds[d];
+      host_bounds_vec[d] = chip_bounds[d] / chips_per_host_bounds[d];
+    } else {
+      return InvalidArgument(
+          "Subslice chip bounds %s is not a supported slice topology: it "
+          "neither fits within one host nor is a multiple of the full slice "
+          "chips_per_host_bounds %s.",
+          chip_bounds.ToString(), chips_per_host_bounds.ToString());
+    }
+  }
+  PjRtDeviceDimensions subslice_host_bounds(host_bounds_vec);
+  return Subslice(subslice_chips_per_host_bounds, subslice_host_bounds);
 }
 
 bool PjRtCApiTopologyDescription::is_subslice_topology() const {

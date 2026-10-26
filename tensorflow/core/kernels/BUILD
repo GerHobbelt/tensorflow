@@ -285,7 +285,9 @@ tf_kernel_library(
         "//tensorflow/core:framework",
         "//tensorflow/core:framework_internal",
         "//tensorflow/core/framework:bounds_check",
+        "//tensorflow/core/platform:logging",
         "//tensorflow/core/platform:tstring",
+        "@com_google_absl//absl/container:inlined_vector",
         "@eigen_archive//:eigen3",
     ],
     alwayslink = 0,
@@ -297,7 +299,11 @@ cc_library(
         "concat_lib.h",
         "concat_lib_cpu.h",
     ],
-    deps = ["@eigen_archive//:eigen3"],
+    deps = [
+        "//tensorflow/core/platform:logging",
+        "@com_google_absl//absl/container:inlined_vector",
+        "@eigen_archive//:eigen3",
+    ],
 )
 
 tf_kernel_library(
@@ -1821,6 +1827,7 @@ tf_cc_test(
     size = "small",
     srcs = ["concat_op_test.cc"],
     deps = [
+        ":concat_lib",
         ":concat_op",
         ":ops_testutil",
         ":ops_util",
@@ -1837,6 +1844,7 @@ tf_cc_test(
         "//tensorflow/core:test",
         "//tensorflow/core:test_main",
         "//tensorflow/core:testlib",
+        "//tensorflow/core/platform:env",
         "//tensorflow/core/platform:tstring",
         "@com_google_absl//absl/base:prefetch",
         "@com_google_googletest//:gtest",
@@ -5020,7 +5028,22 @@ tf_kernel_library(
     deps = [
         "//tensorflow/core:framework",
         "//tensorflow/core:lib",
-        "//tensorflow/core/util:overflow",
+        "//tensorflow/core/platform:errors",
+        "@com_google_absl//absl/status",
+        "@eigen_archive//:eigen3",
+    ],
+)
+
+tf_cuda_only_cc_test(
+    name = "depth_space_ops_gpu_test",
+    size = "small",
+    srcs = ["depth_space_ops_gpu_test.cu.cc"],
+    deps = [
+        ":depth_space_ops",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:test",
+        "//tensorflow/core:test_main",
+        "//tensorflow/core/platform:status_matchers",
         "@com_google_absl//absl/status",
         "@eigen_archive//:eigen3",
     ],

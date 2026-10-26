@@ -795,6 +795,7 @@ py_library(
     deps = [
         ":array_ops_gen",
         ":array_ops_stack",
+        ":logging_ops_gen",
         ":math_ops_gen",
         ":shape_util",
         "//tensorflow/core/config:flags_py",
@@ -1499,6 +1500,7 @@ py_library(
         ":array_ops",
         ":array_ops_gen",
         ":array_ops_stack",
+        ":control_flow_assert",
         ":ctc_ops_gen",
         ":custom_gradient",
         ":functional_ops",

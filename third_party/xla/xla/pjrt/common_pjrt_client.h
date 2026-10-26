@@ -36,7 +36,9 @@ limitations under the License.
 #include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
+#include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/cord.h"
 #include "absl/strings/string_view.h"
 #include "absl/synchronization/mutex.h"
 #include "absl/types/span.h"
@@ -47,6 +49,7 @@ limitations under the License.
 #include "xla/pjrt/abstract_tracked_device_buffer.h"
 #include "xla/pjrt/async_work_runner.h"
 #include "xla/pjrt/device_event.h"
+#include "xla/pjrt/distributed/coordination/coordination_service.pb.h"
 #include "xla/pjrt/dynamic_shapes.h"
 #include "xla/pjrt/infer_dispatch_info.h"
 #include "xla/pjrt/linearize_throttler.h"
@@ -86,6 +89,15 @@ class CommonPjRtClient : public PjRtClient {
   virtual PjRtRawClient* raw_client() const { return nullptr; }
 
   virtual LinearizeThrottler* linearize_throttler() const { return nullptr; }
+
+  // Returns a multi-chunk TransposePlan with contiguous ~2 MiB device chunks,
+  // or nullptr to use the unchunked path.
+  virtual std::shared_ptr<TransposePlan> CreateChunkedTransposePlan(
+      bool is_h2d, const Shape& host_shape,
+      std::optional<absl::Span<int64_t const>> host_byte_strides,
+      const Shape& device_shape) {
+    return nullptr;
+  }
 
   // Some clients do not support recursion eg: calling to_literal in host
   // callbacks. Those clients should return false here.
@@ -228,6 +240,9 @@ class CommonPjRtClient : public PjRtClient {
       absl::AnyInvocable<void() &&> on_done_with_host_buffer);
 
   // Allocates a destination buffer for linearizing into.
+  absl::StatusOr<tsl::AsyncValueRef<PjRtStagingBuffer>> AllocateLinearizeDest(
+      bool sync, size_t size, PjRtRawBufferRef dest_buffer);
+
   absl::StatusOr<tsl::AsyncValueRef<PjRtStagingBuffer>> AllocateLinearizeDest(
       bool sync, const xla::Shape& device_shape,
       absl::Span<const int64_t> byte_strides, PjRtRawBufferRef dest_buffer);
@@ -689,8 +704,8 @@ class CommonPjRtLoadedExecutable : public PjRtLoadedExecutable {
     return *device_assignment_;
   }
 
-  absl::Span<const LogicalDeviceIds> addressable_device_logical_ids()
-      const override {
+  absl::StatusOr<absl::Span<const LogicalDeviceIds>>
+  addressable_device_logical_ids() const override {
     return addressable_device_logical_ids_;
   }
 

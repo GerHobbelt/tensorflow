@@ -6558,6 +6558,77 @@ TEST_F(HloVerifierTestLayoutSensitive,
   EXPECT_THAT(status.message(), HasSubstr("Different aliasing shapes"));
 }
 
+TEST_F(HloVerifierTest, VerifyFanOutAndFanInValid) {
+  const char* const hlo = R"(
+  HloModule module
+
+  ENTRY computation {
+    p0 = s32[4] parameter(0)
+    b0 = b(s32[4]) custom-call(p0), custom_call_target="Pin",
+      output_to_operand_aliasing={{}: (0, {})}
+    fan_out = (b(s32[4]), b(s32[4]), b(s32[4])) custom-call(b0),
+      custom_call_target="FanOut", output_to_operand_aliasing={{0}: (0, {})}
+    anchor = b(s32[4]) get-tuple-element(fan_out), index=0
+    stream1 = b(s32[4]) get-tuple-element(fan_out), index=1
+    stream2 = b(s32[4]) get-tuple-element(fan_out), index=2
+    s1_out = b(s32[4]) custom-call(stream1), custom_call_target="AddOne",
+      output_to_operand_aliasing={{}: (0, {})}
+    fan_in = b(s32[4]) custom-call(anchor, s1_out, stream2),
+      custom_call_target="FanIn", output_to_operand_aliasing={{}: (0, {})}
+    ROOT v = s32[4] custom-call(fan_in), custom_call_target="Unpin",
+      output_to_operand_aliasing={{}: (0, {})}
+  })";
+
+  ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnUnverifiedModule(hlo));
+  EXPECT_THAT(verifier().Run(module.get()), StatusIs(absl::StatusCode::kOk));
+}
+
+TEST_F(HloVerifierTest, VerifyFanInStreamShapeMismatch) {
+  const char* const hlo = R"(
+  HloModule module
+
+  ENTRY computation {
+    p0 = s32[4] parameter(0)
+    p1 = s32[8] parameter(1)
+    b0 = b(s32[4]) custom-call(p0), custom_call_target="Pin",
+      output_to_operand_aliasing={{}: (0, {})}
+    b1 = b(s32[8]) custom-call(p1), custom_call_target="Pin",
+      output_to_operand_aliasing={{}: (0, {})}
+    fan_in = b(s32[4]) custom-call(b0, b1),
+      custom_call_target="FanIn", output_to_operand_aliasing={{}: (0, {})}
+    ROOT v = s32[4] custom-call(fan_in), custom_call_target="Unpin",
+      output_to_operand_aliasing={{}: (0, {})}
+  })";
+
+  ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnUnverifiedModule(hlo));
+  auto status = verifier().Run(module.get()).status();
+  ASSERT_FALSE(status.ok());
+  EXPECT_THAT(status.message(),
+              HasSubstr("custom-call to FanIn result must have the same shape "
+                        "as all operands"));
+}
+
+TEST_F(HloVerifierTest, VerifyFanInDuplicateOperands) {
+  const char* const hlo = R"(
+  HloModule module
+
+  ENTRY computation {
+    p0 = s32[4] parameter(0)
+    b0 = b(s32[4]) custom-call(p0), custom_call_target="Pin",
+      output_to_operand_aliasing={{}: (0, {})}
+    fan_in = b(s32[4]) custom-call(b0, b0),
+      custom_call_target="FanIn", output_to_operand_aliasing={{}: (0, {})}
+    ROOT v = s32[4] custom-call(fan_in), custom_call_target="Unpin",
+      output_to_operand_aliasing={{}: (0, {})}
+  })";
+
+  ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnUnverifiedModule(hlo));
+  auto status = verifier().Run(module.get()).status();
+  ASSERT_FALSE(status.ok());
+  EXPECT_THAT(status.message(),
+              HasSubstr("custom-call to FanIn must have distinct operands"));
+}
+
 TEST_F(HloVerifierTest, Scan) {
   const char* const hlo_string = R"(
   HloModule scan_module
@@ -7401,6 +7472,37 @@ ENTRY Entry (p0: f32[100], update: f32[10], idx: s32[]) -> f32[100] {
   )";
   ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnUnverifiedModule(hlo_string));
   EXPECT_OK(verifier().Run(module.get()).status());
+}
+
+TEST_F(HloVerifierTest, FmaValidAndInvalid) {
+  const char* const kValidHlo = R"(
+  HloModule FmaValid
+  ENTRY Entry {
+    a = f32[4] parameter(0)
+    b = f32[4] parameter(1)
+    c = f32[4] parameter(2)
+    ROOT f = f32[4] fma(a, b, c)
+  })";
+  ASSERT_OK_AND_ASSIGN(auto valid_module,
+                       ParseAndReturnUnverifiedModule(kValidHlo));
+  EXPECT_OK(verifier().Run(valid_module.get()).status());
+
+  auto invalid_module = CreateUnverifiedModule();
+  HloComputation::Builder builder("FmaInvalidInt");
+  Shape s32_shape = ShapeUtil::MakeShape(S32, {4});
+  auto p0 = builder.AddInstruction(
+      HloInstruction::CreateParameter(0, s32_shape, "p0"));
+  auto p1 = builder.AddInstruction(
+      HloInstruction::CreateParameter(1, s32_shape, "p1"));
+  auto p2 = builder.AddInstruction(
+      HloInstruction::CreateParameter(2, s32_shape, "p2"));
+  builder.AddInstruction(
+      HloInstruction::CreateTernary(s32_shape, HloOpcode::kFma, p0, p1, p2));
+  invalid_module->AddEntryComputation(builder.Build());
+  EXPECT_THAT(verifier().Run(invalid_module.get()),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("Expected element type in shape to be "
+                                 "floating for fma operation; got S32.")));
 }
 
 }  // namespace

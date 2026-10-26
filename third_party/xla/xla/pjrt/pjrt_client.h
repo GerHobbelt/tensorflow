@@ -1472,8 +1472,11 @@ class PjRtLoadedExecutable {
     int replica;
     int partition;
   };
-  virtual absl::Span<const LogicalDeviceIds> addressable_device_logical_ids()
-      const = 0;
+  virtual absl::StatusOr<absl::Span<const LogicalDeviceIds>>
+  addressable_device_logical_ids() const {
+    return absl::UnimplementedError(
+        "addressable_device_logical_ids is not supported.");
+  }
 
   // An addressable_device is one which the client can issue commands to.
   // addressable_devices()[i] is the Device to which
