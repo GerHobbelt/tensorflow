@@ -400,6 +400,7 @@ cc_library(
         "@xla//xla/python:refine_polymorphic_shapes",
         "@xla//xla/service:hlo_proto_cc",
         "@xla//xla/service/spmd/shardy/sdy_round_trip:pipelines",
+        "@xla//xla/service/spmd/shardy/stablehlo_round_trip:stablehlo_export",
         "@xla//xla/tsl/platform:errors",
         "@xla//xla/tsl/platform:statusor",
     ],
@@ -1600,7 +1601,6 @@ tf_kernel_library(
         "@xla//xla/hlo/builder:value_inference",
         "@xla//xla/hlo/builder:xla_builder",
         "@xla//xla/hlo/builder/lib:constants",
-        "@xla//xla/hlo/builder/lib:dynamic_shaped_ops",
     ],
 )
 

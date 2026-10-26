@@ -3390,10 +3390,8 @@ bool HloInstruction::IdenticalInternal(
 }
 
 void HloInstruction::AppendOperand(HloInstruction* operand) {
-  if (operand->parent() != nullptr) {
-    DCHECK(!operand->parent()->IsMarkedAsDead(operand))
-        << "Operand " << operand->name() << " is already marked dead";
-  }
+  DCHECK(!operand->IsMarkedAsDead())
+      << "Operand " << operand->name() << " is already marked dead";
   operands_.push_back(operand);
   operand->AddUser(this);
 }
@@ -3514,12 +3512,9 @@ bool HloInstruction::IdenticalSlowPath(
     case HloOpcode::kTan:
     case HloOpcode::kTanh:
     case HloOpcode::kTuple:
-      return true;
-
-    // This opcode has complex or special behavior so just return false.
     case HloOpcode::kAfterAll:
     case HloOpcode::kAddDependency:
-      return false;
+      return true;
 
     // Remaining instructions with special values.
     case HloOpcode::kCall:

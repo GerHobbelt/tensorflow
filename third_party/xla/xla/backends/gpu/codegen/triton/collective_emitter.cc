@@ -1502,9 +1502,8 @@ absl::StatusOr<BlockLevelFusionConfig> GetBlockLevelConfigForAllGather(
   // All-gather always uses a one-shot strategy: every rank reads its peers'
   // slices directly, so the work is proportional to the full output element
   // count with no rank-based partitioning.
-  const int64_t output_elements =
-      all_gather_info.num_elements * all_gather_info.num_devices;
-  const int64_t total_warps = CeilOfRatio(output_elements, elements_per_warp);
+  const int64_t total_warps =
+      CeilOfRatio(all_gather_info.max_output_elements, elements_per_warp);
   const int64_t num_warps = std::min<int64_t>(
       kMaxWarpsPerBlock, llvm::bit_ceil(static_cast<uint64_t>(total_warps)));
   const int64_t num_blocks =
@@ -2320,8 +2319,10 @@ absl::StatusOr<SymmetricMemoryType> GetSymmetricMemoryType(
 }
 
 absl::StatusOr<CollectiveKernelSpec> CreateCollectiveKernelSpec(
-    const HloInstruction* instr, const LaunchDimensions& launch_dimensions,
-    SymmetricMemoryType scratch_memory_type) {
+    const GpuTopology& gpu_topology, const HloInstruction* instr,
+    const LaunchDimensions& launch_dimensions,
+    SymmetricMemoryType scratch_memory_type,
+    const DeviceAssignment* device_assignment) {
   const HloInstruction* collective = instr;
   if (instr->opcode() == HloOpcode::kFusion) {
     collective = GetCollectiveHero(instr->fused_instructions_computation());
@@ -2330,8 +2331,9 @@ absl::StatusOr<CollectiveKernelSpec> CreateCollectiveKernelSpec(
   }
   switch (collective->opcode()) {
     case HloOpcode::kAllReduce:
-      return CreateAllReduceKernelSpec(collective, launch_dimensions,
-                                       scratch_memory_type);
+      return CreateAllReduceKernelSpec(
+          gpu_topology, Cast<HloAllReduceInstruction>(collective),
+          launch_dimensions, scratch_memory_type, device_assignment);
     case HloOpcode::kAllGather:
       return CreateAllGatherKernelSpec(collective, launch_dimensions,
                                        scratch_memory_type);

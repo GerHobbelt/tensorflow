@@ -3061,6 +3061,62 @@ TEST_F(HloVerifierTest, AllToAll_LayoutConstrained) {
     p0 = f32[128,4]{0,1} parameter(0)
     p1 = f32[128,4]{1,0} parameter(1)
     ROOT a2a = (f32[128,4]{0,1}, f32[128,4]{1,0}) all-to-all(p0, p1),
+      replica_groups={{0,1}}, constrain_layout=true
+  }
+  )";
+  HloModuleConfig config;
+  config.set_replica_count(2);
+  ASSERT_OK_AND_ASSIGN(auto module,
+                       ParseAndReturnUnverifiedModule(kModuleStr, config));
+  EXPECT_THAT(verifier().Run(module.get()).status().message(),
+              HasSubstr("HLO all-to-all has operands with different shapes"));
+}
+
+TEST_F(HloVerifierTestLayoutSensitive, AllToAll_DifferentOperandLayouts) {
+  const char* const kModuleStr = R"(
+  HloModule test
+  ENTRY entry {
+    p0 = f32[128,4]{0,1} parameter(0)
+    p1 = f32[128,4]{1,0} parameter(1)
+    ROOT a2a = (f32[128,4]{0,1}, f32[128,4]{1,0}) all-to-all(p0, p1),
+      replica_groups={{0,1}}
+  }
+  )";
+  HloModuleConfig config;
+  config.set_replica_count(2);
+  ASSERT_OK_AND_ASSIGN(auto module,
+                       ParseAndReturnUnverifiedModule(kModuleStr, config));
+  EXPECT_THAT(verifier().Run(module.get()).status().message(),
+              HasSubstr("HLO all-to-all has operands with different shapes"));
+}
+
+TEST_F(HloVerifierTest,
+       AllToAll_DifferentOperandLayoutsBeforeLayoutAssignment) {
+  // Layout-insensitive passes may leave tuple all-to-all operands with
+  // different layouts; this is fine until layouts are assigned.
+  const char* const kModuleStr = R"(
+  HloModule test
+  ENTRY entry {
+    p0 = f32[128,4]{0,1} parameter(0)
+    p1 = f32[128,4]{1,0} parameter(1)
+    ROOT a2a = (f32[128,4]{0,1}, f32[128,4]{1,0}) all-to-all(p0, p1),
+      replica_groups={{0,1}}
+  }
+  )";
+  HloModuleConfig config;
+  config.set_replica_count(2);
+  ASSERT_OK_AND_ASSIGN(auto module,
+                       ParseAndReturnUnverifiedModule(kModuleStr, config));
+  EXPECT_OK(verifier().Run(module.get()).status());
+}
+
+TEST_F(HloVerifierTest, AllToAll_DifferentOperandDimensions) {
+  const char* const kModuleStr = R"(
+  HloModule test
+  ENTRY entry {
+    p0 = f32[128,4] parameter(0)
+    p1 = f32[128,8] parameter(1)
+    ROOT a2a = (f32[128,4], f32[128,8]) all-to-all(p0, p1),
       replica_groups={{0,1}}
   }
   )";
@@ -6628,6 +6684,40 @@ TEST_F(HloVerifierTest, NonAssociativeScanAllowedInLayoutInsensitiveMode) {
   )";
   ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnUnverifiedModule(hlo_string));
   EXPECT_OK(verifier().Run(module.get()).status());
+}
+
+// A BF16 init feeding an F32 carry, as BF16 conversion folding leaves it.
+constexpr absl::string_view kMixedPrecisionScanHlo = R"(
+  HloModule scan_module
+
+  add {
+    lhs = f32[2] parameter(0)
+    rhs = f32[2] parameter(1)
+    add = f32[2] add(lhs, rhs)
+    ROOT t = (f32[2], f32[2]) tuple(add, add)
+  }
+
+  ENTRY entry {
+    input = f32[4,2] parameter(0)
+    init = bf16[2] parameter(1)
+    ROOT scan = (f32[4,2], f32[2]) scan(input, init), dimensions={0}, num_carries=1, is_associative=true, to_apply=add
+  }
+  )";
+
+TEST_F(HloVerifierTestAllowMixedPrecision, ScanMixedPrecisionAllowed) {
+  ASSERT_OK_AND_ASSIGN(auto module,
+                       ParseAndReturnUnverifiedModule(kMixedPrecisionScanHlo));
+  EXPECT_OK(verifier().Run(module.get()).status());
+}
+
+TEST_F(HloVerifierTest, ScanMixedPrecisionRejected) {
+  ASSERT_OK_AND_ASSIGN(auto module,
+                       ParseAndReturnUnverifiedModule(kMixedPrecisionScanHlo));
+  auto status = verifier().Run(module.get()).status();
+  ASSERT_FALSE(status.ok());
+  EXPECT_THAT(status.message(),
+              HasSubstr("Shapes of operand 1 and to_apply computation "
+                        "parameter are inconsistent"));
 }
 
 TEST_F(HloVerifierTest, VerifyAsyncStartOutputToOperandAliasing) {
