@@ -823,7 +823,6 @@ cc_library(
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:FuncExtensions",
         "@llvm-project//mlir:IR",
-        "@llvm-project//mlir:MLProgramDialect",
         "@llvm-project//mlir:Parser",
         "@llvm-project//mlir:Pass",
         "@llvm-project//mlir:ReconcileUnrealizedCasts",
@@ -950,7 +949,7 @@ cc_library(
     srcs = ["transpose_kernels.cc"],
     hdrs = ["transpose_kernels.h"],
     deps = [
-        "//xla:compiler_macros",
+        "@com_google_absl//absl/base:core_headers",
         "@highway//:hwy",
     ],
 )

@@ -675,16 +675,17 @@ PYBIND11_MODULE(_pywrap_tfe, m) {
   // validated and cast here, in C++, rather than by a Python predicate
   // followed by a Python `ndarray.astype`. This mirrors the eager conversion
   // inside PySeqToTFE_TensorHandle.
-  m.def("ArrayToIntegerArray",
-        [](py::object array, py::object dtype) {
-          PyObject* result =
-              tensorflow::PyArrayToIntegerArray(array.ptr(), dtype.ptr());
-          if (result == nullptr) {
-            throw py::error_already_set();
-          }
-          return py::reinterpret_steal<py::object>(result);
-        },
-        py::arg("array"), py::arg("dtype"));
+  m.def(
+      "ArrayToIntegerArray",
+      [](py::object array, py::object dtype) {
+        PyObject* result =
+            tensorflow::PyArrayToIntegerArray(array.ptr(), dtype.ptr());
+        if (result == nullptr) {
+          throw py::error_already_set();
+        }
+        return py::reinterpret_steal<py::object>(result);
+      },
+      py::arg("array"), py::arg("dtype"));
 
   py::class_<TFE_Executor> TFE_Executor_class(m, "TFE_Executor");
   py::class_<TFE_ContextOptions> TFE_ContextOptions_class(m,

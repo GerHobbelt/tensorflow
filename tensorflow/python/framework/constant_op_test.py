@@ -114,17 +114,22 @@ class ConstantOpTest(test.TestCase, parameterized.TestCase):
       # Changing the input array after `xt` is created should not affect `xt`
       self.assertEqual(xt.numpy()[3], 3)
 
-  @parameterized.named_parameters(
-      *[{
+  @parameterized.named_parameters(*[
+      {
           "testcase_name": f"_{int_d.name}_{np.dtype(flt_d).name}",
           "int_dtype": int_d,
           "float_dtype": flt_d,
-      } for int_d in (dtypes.int8, dtypes.int32, dtypes.int64, dtypes.uint8)
-        for flt_d in (np.float16, np.float32, np.float64,
-                      dtypes.bfloat16.as_numpy_dtype,
-                      dtypes.float8_e4m3fn.as_numpy_dtype,
-                      dtypes.float8_e5m2.as_numpy_dtype)]
-  )
+      }
+      for int_d in (dtypes.int8, dtypes.int32, dtypes.int64, dtypes.uint8)
+      for flt_d in (
+          np.float16,
+          np.float32,
+          np.float64,
+          dtypes.bfloat16.as_numpy_dtype,
+          dtypes.float8_e4m3fn.as_numpy_dtype,
+          dtypes.float8_e5m2.as_numpy_dtype,
+      )
+  ])
   def test_non_finite_to_integer_dtype_raises(self, int_dtype, float_dtype):
     # A NumPy array holding NaN or Inf must not be silently mapped to the
     # smallest representable integer. That disagrees with the Python-list
@@ -158,9 +163,10 @@ class ConstantOpTest(test.TestCase, parameterized.TestCase):
     # `__array_interface__` containers (e.g. a PIL image) are opaque to the
     # Python wrappers as well. The protocol only round-trips plain NumPy
     # dtypes, so this is checked with float32 rather than the 16/8-bit types.
-    for value in (_ArrayInterfaceProtocol(np.array([np.nan], dtype=np.float32)),
-                  _ArrayInterfaceProtocol(
-                      np.array([1.0, np.inf], dtype=np.float32))):
+    for value in (
+        _ArrayInterfaceProtocol(np.array([np.nan], dtype=np.float32)),
+        _ArrayInterfaceProtocol(np.array([1.0, np.inf], dtype=np.float32)),
+    ):
       with self.assertRaisesRegex(TypeError, expected_regex):
         constant_op.constant(value, dtype=int_dtype)
       with self.assertRaisesRegex(TypeError, expected_regex):
@@ -170,12 +176,14 @@ class ConstantOpTest(test.TestCase, parameterized.TestCase):
     # (which reach `make_tensor_proto`) and the array-like containers.
     with ops.Graph().as_default():
       with self.assertRaisesRegex(TypeError, expected_regex):
-        constant_op.constant(np.array([np.nan], dtype=float_dtype),
-                             dtype=int_dtype)
+        constant_op.constant(
+            np.array([np.nan], dtype=float_dtype), dtype=int_dtype
+        )
       with self.assertRaisesRegex(TypeError, expected_regex):
-        constant_op.constant(_ArrayProtocol(np.array([np.nan],
-                                                     dtype=float_dtype)),
-                             dtype=int_dtype)
+        constant_op.constant(
+            _ArrayProtocol(np.array([np.nan], dtype=float_dtype)),
+            dtype=int_dtype,
+        )
 
     # Complex inputs with a non-finite real or imaginary plane are rejected
     # too: complex kinds were previously skipped by the guard. Scalars, 0-D
@@ -184,13 +192,19 @@ class ConstantOpTest(test.TestCase, parameterized.TestCase):
     # scalar type, which `np.dtype(cdt.as_numpy_dtype)` is not.
     for cdt in (dtypes.complex64, dtypes.complex128):
       cfloat_dtype = cdt.as_numpy_dtype
-      for value in (cfloat_dtype(complex(np.nan, 1.0)),
-                    np.array(complex(1.0, np.inf), dtype=cfloat_dtype),
-                    np.array([complex(np.nan, 1.0)], dtype=cfloat_dtype),
-                    np.array([complex(1.0, np.inf)], dtype=cfloat_dtype),
-                    np.array([[complex(1.0, 0.0), complex(1.0, np.nan)],
-                              [complex(3.0, 0.0), complex(4.0, 0.0)]],
-                             dtype=cfloat_dtype)):
+      for value in (
+          cfloat_dtype(complex(np.nan, 1.0)),
+          np.array(complex(1.0, np.inf), dtype=cfloat_dtype),
+          np.array([complex(np.nan, 1.0)], dtype=cfloat_dtype),
+          np.array([complex(1.0, np.inf)], dtype=cfloat_dtype),
+          np.array(
+              [
+                  [complex(1.0, 0.0), complex(1.0, np.nan)],
+                  [complex(3.0, 0.0), complex(4.0, 0.0)],
+              ],
+              dtype=cfloat_dtype,
+          ),
+      ):
         with self.assertRaisesRegex(TypeError, expected_regex):
           constant_op.constant(value, dtype=int_dtype)
         with self.assertRaisesRegex(TypeError, expected_regex):
@@ -200,14 +214,24 @@ class ConstantOpTest(test.TestCase, parameterized.TestCase):
     # exactly representable in every dtype under test -- including the float8
     # variants, which have only two or three mantissa bits -- so the truncating
     # result is unambiguous.
-    self.assertAllEqual([], constant_op.constant(
-        np.array([], dtype=float_dtype), dtype=int_dtype))
-    self.assertAllEqual(1, constant_op.constant(
-        np.array(1.25, dtype=float_dtype), dtype=int_dtype))
+    self.assertAllEqual(
+        [],
+        constant_op.constant(np.array([], dtype=float_dtype), dtype=int_dtype),
+    )
+    self.assertAllEqual(
+        1,
+        constant_op.constant(
+            np.array(1.25, dtype=float_dtype), dtype=int_dtype
+        ),
+    )
 
     # Finite floats keep the previous (truncating) behaviour.
-    self.assertAllEqual([1], constant_op.constant(
-        np.array([1.25], dtype=float_dtype), dtype=int_dtype))
+    self.assertAllEqual(
+        [1],
+        constant_op.constant(
+            np.array([1.25], dtype=float_dtype), dtype=int_dtype
+        ),
+    )
 
   def test_eager_const_grad_error(self):
 
