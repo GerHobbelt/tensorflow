@@ -1874,6 +1874,7 @@ tf_xla_py_strict_test(
     deps = [
         ":xla_test",
         "//tensorflow/python:extra_py_tests_deps",
+        "//tensorflow/python/eager:def_function",
         "//tensorflow/python/framework:dtypes",
         "//tensorflow/python/framework:test_lib",
         "//tensorflow/python/ops:array_ops",
@@ -1898,7 +1899,9 @@ tf_xla_py_strict_test(
     ],
     deps = [
         ":xla_test",
+        "//tensorflow/python/eager:def_function",
         "//tensorflow/python/framework:dtypes",
+        "//tensorflow/python/framework:errors",
         "//tensorflow/python/ops:array_ops",
         "//tensorflow/python/ops:array_ops_stack",
         "//tensorflow/python/ops:bitwise_ops",

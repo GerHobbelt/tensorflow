@@ -2124,6 +2124,7 @@ xla_test(
     backends = ["gpu"],
     tags = ["cuda-only"],
     deps = [
+        ":cuda_command_buffer",
         ":cuda_compute_capability",
         ":cudnn_plugin",
         "//xla/service:platform_util",
@@ -3003,6 +3004,7 @@ xla_test(
         "//xla/tsl/platform:env",
         "@com_google_absl//absl/status:status_macros",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest_main",
     ],
 )

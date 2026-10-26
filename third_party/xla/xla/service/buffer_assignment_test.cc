@@ -5280,11 +5280,12 @@ TEST(ComputeIndefiniteAllocationsTest, AllConditionsFalse) {
 }
 
 TEST(ComputeIndefiniteAllocationsTest, IsThreadLocal) {
+  // Thread-local allocations are never materialized, so they do not count.
   BufferAssignmentProto proto;
   BufferAllocationProto* alloc1 = proto.add_buffer_allocations();
   alloc1->set_size(10);
   alloc1->set_is_thread_local(true);
-  EXPECT_EQ(ComputeIndefiniteAllocationsInBytes(proto, /*memory_color=*/0), 10);
+  EXPECT_EQ(ComputeIndefiniteAllocationsInBytes(proto, /*memory_color=*/0), 0);
 }
 
 TEST(ComputeIndefiniteAllocationsTest, IsEntryComputationParameter) {
@@ -5319,7 +5320,8 @@ TEST(ComputeIndefiniteAllocationsTest, AllConditionsTrue) {
   alloc1->set_is_entry_computation_parameter(true);
   alloc1->set_is_constant(true);
   alloc1->set_maybe_live_out(true);
-  EXPECT_EQ(ComputeIndefiniteAllocationsInBytes(proto, /*memory_color=*/0), 10);
+  // Thread-local wins: such an allocation is never materialized.
+  EXPECT_EQ(ComputeIndefiniteAllocationsInBytes(proto, /*memory_color=*/0), 0);
 }
 
 TEST(ComputeIndefiniteAllocationsTest, MultipleAllocations) {
@@ -5338,8 +5340,7 @@ TEST(ComputeIndefiniteAllocationsTest, MultipleAllocations) {
   alloc4->set_maybe_live_out(true);
   BufferAllocationProto* alloc5 = proto.add_buffer_allocations();
   alloc5->set_size(500);
-  EXPECT_EQ(ComputeIndefiniteAllocationsInBytes(proto, /*memory_color=*/0),
-            100);
+  EXPECT_EQ(ComputeIndefiniteAllocationsInBytes(proto, /*memory_color=*/0), 90);
 }
 
 TEST(ComputeIndefiniteAllocationsTest, NonMatchingColorAllocations) {
@@ -5365,7 +5366,7 @@ TEST(ComputeIndefiniteAllocationsTest, OnlyMatchingColorAllocations) {
   alloc2->set_size(20);
   alloc2->set_color(0);
   alloc2->set_is_constant(true);
-  EXPECT_EQ(ComputeIndefiniteAllocationsInBytes(proto, /*memory_color=*/0), 30);
+  EXPECT_EQ(ComputeIndefiniteAllocationsInBytes(proto, /*memory_color=*/0), 20);
 }
 
 TEST(ComputeIndefiniteAllocationsTest, MixedColorAllocations) {
@@ -5382,7 +5383,7 @@ TEST(ComputeIndefiniteAllocationsTest, MixedColorAllocations) {
   alloc3->set_size(30);
   alloc3->set_color(0);
   alloc3->set_maybe_live_out(true);
-  EXPECT_EQ(ComputeIndefiniteAllocationsInBytes(proto, /*memory_color=*/0), 40);
+  EXPECT_EQ(ComputeIndefiniteAllocationsInBytes(proto, /*memory_color=*/0), 30);
 }
 
 TEST_F(BufferAssignmentTest, TopologicalOrder) {
@@ -5579,6 +5580,18 @@ TEST(ComputeTotalAllocationBytesTest, OnlyMatchingColorAllocations) {
   alloc2->set_size(20);
   alloc2->set_color(0);
   EXPECT_EQ(ComputeTotalAllocationBytes(proto, /*memory_color=*/0), 30);
+}
+
+TEST(ComputeTotalAllocationBytesTest, ThreadLocalAllocationsAreExcluded) {
+  BufferAssignmentProto proto;
+  BufferAllocationProto* alloc1 = proto.add_buffer_allocations();
+  alloc1->set_size(10);
+  alloc1->set_color(0);
+  BufferAllocationProto* alloc2 = proto.add_buffer_allocations();
+  alloc2->set_size(20);
+  alloc2->set_color(0);
+  alloc2->set_is_thread_local(true);
+  EXPECT_EQ(ComputeTotalAllocationBytes(proto, /*memory_color=*/0), 10);
 }
 
 TEST_F(BufferAssignmentTest, ScanComputation) {
@@ -5864,6 +5877,128 @@ void BM_FastMergeManagerStress(::testing::benchmark::State& state) {
 }
 
 BENCHMARK(BM_FastMergeManagerStress)->Range(1'000, 10'000'000);
+
+void BM_MaybeAssignBufferStress(::testing::benchmark::State& state) {
+  const int64_t num_buffers = state.range(0);
+  HloModuleConfig config;
+  config.set_debug_options(GetDebugOptionsFromFlags());
+  HloModule module("BM_MaybeAssignBufferStress", config);
+  auto builder = HloComputation::Builder("entry");
+
+  Shape shape = ShapeUtil::MakeShape(F32, {16});
+  auto param0 =
+      builder.AddInstruction(HloInstruction::CreateParameter(0, shape, "p"));
+  std::vector<HloInstruction*> insts;
+  insts.reserve(num_buffers);
+  insts.push_back(param0);
+
+  std::vector<HloInstruction*> root_elements;
+  for (int64_t i = 1; i < num_buffers; ++i) {
+    HloOpcode opcode = (i % 4 == 0) ? HloOpcode::kCopy : HloOpcode::kNegate;
+    HloInstruction* inst = builder.AddInstruction(
+        HloInstruction::CreateUnary(shape, opcode, insts.back()));
+    insts.push_back(inst);
+    if (i % 64 == 0) {
+      root_elements.push_back(inst);
+    }
+  }
+  if (root_elements.empty()) {
+    root_elements.push_back(insts.back());
+  }
+  HloInstruction* root =
+      builder.AddInstruction(HloInstruction::CreateTuple(root_elements));
+  insts.push_back(root);
+  HloComputation* entry = module.AddEntryComputation(builder.Build());
+
+  HloSchedule schedule(&module);
+  schedule.set_sequence(entry, insts);
+  CHECK_OK(module.set_schedule(schedule));
+
+  AliasInfo alias_info;
+  BufferAssigner::Options opts;
+  opts.assignment_algorithm_for_computations_without_ordering =
+      buffer_assignment::
+          AssignmentAlgorithmForComputationsWithoutOrderingProto::FAST_MERGE;
+  opts.buffer_assignment_algorithm =
+      buffer_assignment::BufferAssignmentAlgorithmProto::FAST_MERGE;
+  opts.color_memory_limit = [](LogicalBuffer::Color) -> int64_t {
+    return int64_t{1} << 40;
+  };
+  opts.must_not_live_out = [](const HloAliasAnalysis&,
+                              const HloInstruction* instr, const ShapeIndex&) {
+    return instr->opcode() == HloOpcode::kNegate &&
+           (instr->unique_id() % 5 == 0);
+  };
+  BufferAssigner assigner(&alias_info, std::move(opts));
+
+  ASSERT_OK_AND_ASSIGN(
+      auto base_assignment,
+      assigner.CreateAssignment(
+          &module, std::make_unique<SequentialHloOrdering>(schedule),
+          &BufferSizeBytes, [](LogicalBuffer::Color) { return 1; }));
+
+  std::vector<const HloBuffer*> buffers;
+  buffers.reserve(num_buffers);
+  for (int64_t i = 0; i < num_buffers; ++i) {
+    buffers.push_back(
+        &base_assignment->alias_analysis().GetBufferContainingValue(
+            base_assignment->dataflow_analysis().GetUniqueValueAt(insts[i],
+                                                                  {})));
+  }
+
+  constexpr int kWindowSize = 8;
+  constexpr int kMaxAssignedPerAlloc = 32;
+
+  for (auto s : state) {
+    base_assignment->ClearAllocations();
+    std::vector<BufferAllocation::Index> active_allocs;
+    active_allocs.reserve(kWindowSize);
+    for (int k = 0; k < kWindowSize; ++k) {
+      BufferAllocation* alloc = base_assignment->NewEmptyAllocation(
+          (k % 2 == 0) ? 64 : 128, LogicalBuffer::Color(0));
+      if (k < kWindowSize / 2) {
+        alloc->set_maybe_live_out(true);
+      }
+      active_allocs.push_back(alloc->index());
+    }
+
+    int replace_idx = 0;
+    for (int64_t i = 0; i < num_buffers; ++i) {
+      const HloBuffer* buffer = buffers[i];
+      bool assigned = false;
+      for (int k = 0; k < kWindowSize; ++k) {
+        BufferAllocation::Index idx = active_allocs[(i + k) % kWindowSize];
+        BufferAllocation* alloc = base_assignment->GetMutableAllocation(idx);
+        auto status_or =
+            assigner.MaybeAssignBuffer(alloc, *buffer, base_assignment.get());
+        if (status_or.ok() && status_or.value()) {
+          assigned = true;
+          if (alloc->assigned_buffers().size() >= kMaxAssignedPerAlloc) {
+            BufferAllocation* new_alloc = base_assignment->NewEmptyAllocation(
+                ((i + k) % 2 == 0) ? 64 : 128, LogicalBuffer::Color(0));
+            if (((i + k) % kWindowSize) < kWindowSize / 2) {
+              new_alloc->set_maybe_live_out(true);
+            }
+            active_allocs[(i + k) % kWindowSize] = new_alloc->index();
+          }
+          break;
+        }
+      }
+      if (!assigned) {
+        BufferAllocation* new_alloc =
+            base_assignment->NewEmptyAllocation(64, LogicalBuffer::Color(0));
+        active_allocs[replace_idx] = new_alloc->index();
+        replace_idx = (replace_idx + 1) % kWindowSize;
+        CHECK_OK(
+            assigner
+                .MaybeAssignBuffer(new_alloc, *buffer, base_assignment.get())
+                .status());
+      }
+    }
+  }
+}
+
+BENCHMARK(BM_MaybeAssignBufferStress)->Range(1'000, 1'000'000);
 
 // Tests that BufferAssignment::FromProto rejects a malformed proto containing
 // an assigned buffer with a negative offset or size.

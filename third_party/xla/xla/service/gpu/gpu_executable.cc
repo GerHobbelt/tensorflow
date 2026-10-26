@@ -510,12 +510,16 @@ GpuExecutable::GpuExecutable(
       debug_buffer_assignment_show_max_(
           debug_options.xla_debug_buffer_assignment_show_max()),
       constants_(std::move(constants)),
-      module_globals_(std::make_unique<GpuModuleGlobals>(binary_, constants_)),
+      module_globals_(std::make_unique<GpuModuleGlobals>(
+          binary_, constants_,
+          gpu_topology.has_value() ? gpu_topology->num_devices_per_host() : 0)),
       output_info_(std::move(output_info)),
       enable_debug_info_manager_(enable_debug_info_manager),
       thunk_sequence_proto_(std::move(thunk_sequence_proto)),
       executable_abi_version_(std::move(executable_abi_version)),
       cpu_target_machine_options_(std::move(cpu_target_machine_options)),
+      collective_memory_cache_(
+          gpu_topology.has_value() ? gpu_topology->num_devices_per_host() : 0),
       buffer_allocations_debug_summary_(
           std::move(buffer_allocations_debug_summary)),
       collective_use_minimal_resource_(collective_use_minimal_resource),
@@ -923,9 +927,26 @@ absl::Status GpuExecutable::ExecuteThunksImpl(
         HangWatchdog::Abort(device_watchdog_name, device_timeout)));
   }
 
-  if (!device_guards.empty()) {
-    ABSL_RETURN_IF_ERROR(
-        main_stream->DoHostCallback([guards = std::move(device_guards)] {}));
+  // TODO(b/573818657): Re-enable device_error_callback once the host callback
+  // performance regression is fixed.
+  std::shared_ptr<const GpuExecutableRunOptions::DeviceErrorCallback> error_cb =
+      nullptr;
+
+  if (!device_guards.empty() || error_cb != nullptr) {
+    ABSL_RETURN_IF_ERROR(main_stream->DoHostCallback(
+        [guards = std::move(device_guards)] {},
+        [device_ordinal = executor->device_ordinal(), module_name, run_id,
+         error_cb = std::move(error_cb)](absl::Status status) {
+          if (absl::IsCancelled(status)) {
+            return;
+          }
+          LOG(ERROR) << absl::StreamFormat(
+              "[%d] Async device error in `%s` (run_id=%v): %v", device_ordinal,
+              module_name, run_id, status);
+          if (error_cb != nullptr && *error_cb) {
+            (*error_cb)(device_ordinal, status);
+          }
+        }));
   }
 
   return MaybeSyncAndProfile(run_options, execution_timer.get(),

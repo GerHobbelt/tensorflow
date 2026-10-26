@@ -70,13 +70,10 @@ absl::Status IsAllGatherKernelSupported(int64_t num_elements,
 }
 
 absl::Status IsAllGatherKernelSupported(
-    bool is_collective_kernel_enabled, const se::DeviceDescription& device_info,
-    int32_t num_operands, int64_t num_devices, int64_t num_elements,
-    int64_t per_rank_gather_dim_size, PrimitiveType element_type, bool is_local,
+    const se::DeviceDescription& device_info, int32_t num_operands,
+    int64_t num_devices, int64_t num_elements, int64_t per_rank_gather_dim_size,
+    PrimitiveType element_type, bool is_local,
     const std::vector<ReplicaGroup>& replica_groups) {
-  if (!is_collective_kernel_enabled) {
-    return absl::UnimplementedError("Collective kernel is not enabled.");
-  }
   // Check if the device supports Triton collective codegen:
   // CUDA: Requires compute capability 9.0+ (Hopper or newer)
   if (!device_info.cuda_compute_capability().IsAtLeastHopper() &&
@@ -127,8 +124,7 @@ absl::Status IsAllGatherKernelSupported(
 }
 
 absl::StatusOr<AllGatherInfo> BuildAllGatherInfo(
-    bool is_collective_kernel_enabled, const GpuTopology& gpu_topology,
-    const HloAllGatherInstruction* all_gather,
+    const GpuTopology& gpu_topology, const HloAllGatherInstruction* all_gather,
     const DeviceAssignment* device_assignment) {
   if (!gpu_topology.has_gpu_target_config()) {
     return absl::InvalidArgumentError(
@@ -159,42 +155,14 @@ absl::StatusOr<AllGatherInfo> BuildAllGatherInfo(
       const bool is_local,
       AreAllReplicasOnSameSlice(gpu_topology, *all_gather, device_assignment));
   ABSL_RETURN_IF_ERROR(IsAllGatherKernelSupported(
-      is_collective_kernel_enabled, device_info, num_operands, num_devices,
-      num_elements, per_rank_gather_dim_size, element_type, is_local,
+      device_info, num_operands, num_devices, num_elements,
+      per_rank_gather_dim_size, element_type, is_local,
       all_gather->replica_groups()));
   return AllGatherInfo{
       /*.num_devices =*/num_devices,
       /*.num_elements =*/num_elements,
       /*.element_type =*/element_type,
   };
-}
-
-namespace {
-// All-gather always uses a one-shot strategy: every rank reads its peers'
-// slices directly, so the work is proportional to the full element count
-// with no rank-based partitioning.
-static constexpr uint64_t kMaxThreadsPerBlock = 512;
-}  // namespace
-
-LaunchDimensions AllGatherLaunchDimensions(
-    int64_t elements, int64_t num_ranks,
-    const se::DeviceDescription& device_info) {
-  // Maximum number of threads such that each thread has elements to process.
-  // Round up to a multiple of warp_size so every warp is fully occupied.
-  const int64_t output_elements = elements * num_ranks;
-  // Assuming each thread writes se::gpu::kNumElementsPerThread output elements
-  // we need total threads corresponding to the output elements.
-  const int64_t total_threads =
-      RoundUpTo(CeilOfRatio(output_elements, se::gpu::kNumElementsPerThread),
-                device_info.threads_per_warp());
-  // Triton expects power of 2 for threads_per_block / threads_per_warp.
-  const int64_t threads_per_block =
-      std::min(kMaxThreadsPerBlock,
-               llvm::bit_ceil(static_cast<uint64_t>(total_threads)));
-  const int64_t blocks_per_grid =
-      std::min(kAllGatherMaxBlocksPerGrid,
-               CeilOfRatio(total_threads, threads_per_block));
-  return LaunchDimensions(blocks_per_grid, threads_per_block);
 }
 
 absl::StatusOr<CollectiveKernelSpec> CreateAllGatherKernelSpec(
